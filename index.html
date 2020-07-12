@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        .wrapper {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #video {
+            width: 600px;
+            height: 400px;
+            box-shadow: 0 0 10px rgba(100, 100, 100, 0.3);
+            outline: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrapper">
+        <video controls id="video"></video>
+    </div>
+    <script src="/bundle.js"></script>
+    <script>
+        var config = {
+            req: "http://127.0.0.1:8123/video/TQ2Ytc3g1Pw/160.mp4",
+            thread: 2,
+            thunk: 81920,
+            start: 0,
+            end: 1670400
+        }
+        var loader = new fastloadjs(config);
+        // loader.save("1.mp4")
+        loader.attach(document.querySelector('#video'), [
+            {
+                req: "http://127.0.0.1:8123/video/TQ2Ytc3g1Pw/160.mp4",
+                init: { start: 0, end: 709 },
+                index: { start: 710, end: 1281 },
+                mimeCodec: 'video/mp4; codecs="avc1.4d400c"',
+            },
+            {
+                req: "http://127.0.0.1:8123/video/TQ2Ytc3g1Pw/140.mp4",
+                init: { start: 0, end: 591 },
+                index: { start: 592, end: 899 },
+                mimeCodec: 'audio/mp4; codecs="mp4a.40.2"'
+            }
+        ])
+
+    </script>
+</body>
+
+</html>
