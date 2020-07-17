@@ -226,7 +226,7 @@ export default class fastload extends event {
 				this.rtcLoop = setInterval(() => {
 					const stat = rtc.getStats()
 					this.trigger('rtc.stat', stat, rtc.id)
-				}, 900)
+				}, 2e3)
 				return;
 			}
 			let alive = false
@@ -242,7 +242,16 @@ export default class fastload extends event {
 			}
 			query(item.no)
 			this.trigger('res.rtc.start', item)
-		}, 600)
+		}, 2e3)
+		rtc.listen('buffer.progress', ({ id, i, n, uid }) => {
+			// 传输进行中
+			const [idtag, index] = id.split('|')
+			if (this.config.meta != idtag) {
+				// rtc实例是共享的,非本loader的数据忽略
+				return;
+			}
+			this.trigger('res.rtc.progress', { i, n, uid, no: index, })
+		})
 		rtc.listen('data', ({ id, index, buffer }) => {
 			const item = {
 				no: index,
