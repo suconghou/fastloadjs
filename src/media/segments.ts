@@ -96,6 +96,13 @@ export default class segments {
     rtcNext() {
         for (let i = this.index; i < this.total; i++) {
             const item = this.taskMap[i]
+            if (!item.done && !item.rstart && !item.start) {
+                item.rstart = true
+                return item;
+            }
+        }
+        for (let i = this.index; i < this.total; i++) {
+            const item = this.taskMap[i]
             if (!item.done && !item.rstart) {
                 item.rstart = true
                 return item;
