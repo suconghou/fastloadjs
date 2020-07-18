@@ -126,6 +126,7 @@ export default class extends fastload {
                     } else {
                         this.start()
                     }
+                    return
                 }
             }
         }
