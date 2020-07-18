@@ -87,7 +87,7 @@ export default class extends event {
                                     throw e
                                 }
                                 this.trigger('pause');
-                                this.sourceBuffer.remove(0, this.video.currentTime - 1);
+                                this.sourceBuffer.remove(0, Math.max(1, this.video.currentTime - 1));
                                 await sleep(80);
                                 continue;
                             }

@@ -42,7 +42,7 @@ export default class {
     // 此处需要轮询一遍,查漏
     next() {
         const r = this.taskMap[this.index]
-        if (r && !r.done && !r.start) {
+        if (r && !r.done && !(r.start || r.rstart)) {
             this.index++
             r.start = true
             return r
@@ -50,14 +50,15 @@ export default class {
         // 查找跳过的
         for (let i = this.index; i < this.total; i++) {
             const item = this.taskMap[i]
-            if (!item.done) {
+            if (!item.done && !item.start) {
                 item.start = true
+                this.index = item.no + 1
                 return item;
             }
         }
         for (let i = 0; i < this.total; i++) {
             const item = this.taskMap[i]
-            if (!item.done) {
+            if (!item.done && !item.start) {
                 item.start = true
                 return item;
             }
@@ -68,8 +69,15 @@ export default class {
     rtcNext() {
         for (let i = this.index; i < this.total; i++) {
             const item = this.taskMap[i]
-            if (!item.done && !item.start) {
-                item.start = true
+            if (!item.done && !item.rstart && !item.start) {
+                item.rstart = true
+                return item;
+            }
+        }
+        for (let i = this.index; i < this.total; i++) {
+            const item = this.taskMap[i]
+            if (!item.done && !item.rstart) {
+                item.rstart = true
                 return item;
             }
         }
