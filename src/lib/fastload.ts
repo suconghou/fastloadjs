@@ -20,8 +20,7 @@ const iceServers = {
 	]
 };
 
-const rtc = new libwebrtc(iceServers)
-rtc.init()
+let rtc: libwebrtc;
 
 export default class fastload extends event {
 
@@ -49,6 +48,10 @@ export default class fastload extends event {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
 
+		if (!rtc) {
+			rtc = new libwebrtc(iceServers)
+			rtc.init()
+		}
 	}
 
 	public start(pause: boolean) {
@@ -82,7 +85,9 @@ export default class fastload extends event {
 	}
 
 	public pause(pause: boolean) {
-		this.worker.pause = pause
+		if (this.worker) {
+			this.worker.pause = pause
+		}
 	}
 
 	public destroy() {
