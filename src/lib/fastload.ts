@@ -132,7 +132,7 @@ export default class fastload extends event {
 				this.refBuffer.q.clear()
 				cleared = true
 			}
-			this.refBuffer.push(buffer.data)
+			this.refBuffer.repush(buffer.data)
 		}
 	}
 

@@ -70,6 +70,12 @@ export default class extends event {
         return false
     }
 
+    // cachefill 时, done需要重置为false
+    repush(data: any) {
+        this.done = false
+        this.push(data)
+    }
+
     push(data: any) {
         this.q.push(() => {
             return new Promise(async (resolve, reject) => {
@@ -82,16 +88,16 @@ export default class extends event {
                         if (this.update) {
                             try {
                                 this.sourceBuffer.appendBuffer(data)
+                                return resolve();
                             } catch (e) {
                                 if (e.name !== 'QuotaExceededError') {
                                     throw e
                                 }
                                 this.trigger('pause');
-                                this.sourceBuffer.remove(0, Math.max(1, this.video.currentTime - 1));
+                                this.sourceBuffer.remove(0, Math.max(1, this.video.currentTime - 3));
                                 await sleep(80);
                                 continue;
                             }
-                            return resolve();
                         } else {
                             await sleep(10);
                         }
