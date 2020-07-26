@@ -296,6 +296,10 @@ export default class fastload extends event {
 	}
 
 	static rtc() {
+		if (!rtc) {
+			rtc = new libwebrtc(iceServers)
+			rtc.init()
+		}
 		return rtc
 	}
 }
