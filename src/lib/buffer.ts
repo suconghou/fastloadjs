@@ -77,7 +77,7 @@ export default class extends event {
                     try {
                         if (this.done) {
                             // 调用了destroy,则全部任务取消
-                            return
+                            return resolve()
                         }
                         if (this.update) {
                             try {
