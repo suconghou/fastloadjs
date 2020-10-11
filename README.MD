@@ -16,3 +16,8 @@
 2. webm和mp4解析 https://github.com/suconghou/mediaparse
 
 
+### 编译前配置项
+
+可配置 `lib/fastload.ts` 中 `iceServers`
+
+`make build` 完成编译

@@ -7,6 +7,7 @@ export interface fastConfig {
 	readonly req: RequestInfo;
 	readonly meta: string
 	readonly mirrors: Array<string>
+	readonly nop2p: boolean
 }
 
 export interface httpResponse {

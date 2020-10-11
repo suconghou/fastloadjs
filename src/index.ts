@@ -19,6 +19,7 @@ export default class extends fastload {
             thunk: 1024 ** 2,
             meta: req,
             mirrors: [],
+            nop2p: true
         }
         const res = new fastload(config).start(false).getResponse()
         return await res.arrayBuffer()
@@ -49,6 +50,7 @@ export default class extends fastload {
                         thread: this.config.thread,
                         meta,
                         mirrors,
+                        nop2p: this.config.nop2p
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)

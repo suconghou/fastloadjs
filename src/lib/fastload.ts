@@ -48,7 +48,7 @@ export default class fastload extends event {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
 
-		if (!rtc) {
+		if (!this.config.nop2p && !rtc) {
 			rtc = new libwebrtc(iceServers)
 			rtc.init()
 		}
@@ -78,8 +78,10 @@ export default class fastload extends event {
 			}
 			i++;
 		}
-		if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
-			setTimeout(() => this.rtcInit(), 1e3)
+		if (!this.config.nop2p) {
+			if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
+				setTimeout(() => this.rtcInit(), 1e3)
+			}
 		}
 		return this;
 	}
@@ -173,7 +175,7 @@ export default class fastload extends event {
 			}, 200)
 		}
 		this.dispatcher.done(res.no);
-		if (this.config.meta != this.config.req) {
+		if (!this.config.nop2p && this.config.meta != this.config.req) {
 			// 不是indexRange的请求才使用rtc
 			rtc.found(this.config.meta, res.no)
 		}
