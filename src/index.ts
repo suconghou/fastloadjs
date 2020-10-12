@@ -40,9 +40,9 @@ export default class extends fastload {
                     const { req, init, index, mimeCodec, len, duration, meta, mirrors } = streams[i]
                     let mediaInfo = { index, len, duration };
                     let webm = /\.webm/.test(req)
-                    const idata = await Promise.all([this.get(req, init.start, init.end + 1), this.get(req, index.start, index.end + 1)])
-                    const [initdata, indexdata] = idata
-                    initdatas.push(idata)
+                    const initdata = await this.get(req, init.start, init.end + 1)
+                    const indexdata = await this.get(req, index.start, index.end + 1)
+                    initdatas.push([initdata, indexdata])
                     const config = {
                         req,
                         start: 0,
