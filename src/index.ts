@@ -10,7 +10,7 @@ export default class extends fastload {
 
     private video: HTMLMediaElement
 
-    private async get(req: string, start: number, end: number) {
+    private async get(req: string, start: number, end: number, mirrors: Array<string>) {
         const config = {
             req,
             start: Number(start),
@@ -18,7 +18,7 @@ export default class extends fastload {
             thread: 1,
             thunk: 1024 ** 2,
             meta: req,
-            mirrors: [],
+            mirrors,
             nop2p: true
         }
         const res = new fastload(config).start(false).getResponse()
@@ -40,8 +40,8 @@ export default class extends fastload {
                     const { req, init, index, mimeCodec, len, duration, meta, mirrors } = streams[i]
                     let mediaInfo = { index, len, duration };
                     let webm = /\.webm/.test(req)
-                    const initdata = await this.get(req, init.start, init.end + 1)
-                    const indexdata = await this.get(req, index.start, index.end + 1)
+                    const initdata = await this.get(req, init.start, init.end + 1, mirrors)
+                    const indexdata = await this.get(req, index.start, index.end + 1, mirrors)
                     initdatas.push([initdata, indexdata])
                     const config = {
                         req,
