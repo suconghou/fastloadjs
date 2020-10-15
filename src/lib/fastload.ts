@@ -138,25 +138,34 @@ export default class fastload extends event {
 		}
 	}
 
-	// 获取速度快URL
+	// 处理mirrors负载策略
 	private taskWrap(item: any): Function {
 		const { m, n, no } = item
 		let i = 0;
+		const used: Array<RequestInfo> = []
 		const urlFn = () => {
 			i++
+			const mirrors = [this.config.req].concat(this.config.mirrors)
+			// 首次使用取余算法,固定的分片序号被分配到固定的镜像上,首位镜像有较高权重
+			let u = mirrors[no % mirrors.length]
 			if (i <= 1) {
-				// 使用取余算法,第0分片必定分到主镜像上
-				const mirrors = [this.config.req].concat(this.config.mirrors)
-				return mirrors[no % mirrors.length]
+				used.push(u)
+				return u
 			}
-			return this.getBestURL();
+			// 重试时排除之前使用的镜像然后在剩余镜像里随机
+			u = this.getBestURL(mirrors, used);
+			used.push(u)
+			return u
 		}
 		return tasks.wrap(this.config.retry, urlFn, m, n, no)
 	}
 
-	// 这个是第二次重试的,当前使用随机算法
-	private getBestURL(): RequestInfo {
-		const mirrors = [this.config.req].concat(this.config.mirrors)
+	// 这个是第二次及以后重试的,排除之前使用的,然后在剩余里随机,如果都使用过,则重新随机
+	private getBestURL(mirrors: RequestInfo[], used: RequestInfo[]): RequestInfo {
+		const m = mirrors.filter(item => !used.includes(item))
+		if (m.length) {
+			return m[Math.floor(Math.random() * m.length)]
+		}
 		return mirrors[Math.floor(Math.random() * mirrors.length)]
 	}
 
