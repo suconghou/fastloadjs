@@ -23,20 +23,30 @@ export default class fetcher {
 		end: number,
 		opts: fetchOpts
 	): Promise<httpResponse> {
+		// this.get 抛出的timeout是ttfb超时了,我们在parse里再设计个read的超时
 		const res = await this.get(req, start, end, opts);
-		return this.parse(res);
+		return this.parse(res, opts);
 	}
 
 	// 解析成stream能识别的格式
-	private static async parse(res: Response): Promise<httpResponse> {
-		try {
-			if (![200, 206, 304].includes(res.status)) {
-				throw new Error(res.statusText)
-			}
-			const data = await res.arrayBuffer()
-			return { no: null, data: data, err: null, };
-		} catch (e) {
-			return { no: null, err: e, data: null }
+	private static async parse(res: Response, opts: fetchOpts): Promise<httpResponse> {
+		if (![200, 206, 304].includes(res.status)) {
+			throw new Error(res.statusText)
 		}
+		const timeout: Promise<httpResponse> = new Promise((resolve, reject) => {
+			setTimeout(() => {
+				reject("readtimeout")
+			}, opts.readtimeout)
+		})
+		const resdata: Promise<httpResponse> = new Promise(async (resolve, reject) => {
+			try {
+				const data = await res.arrayBuffer()
+				resolve({ no: null, data: data, err: null });
+			}
+			catch (e) {
+				reject(e);
+			}
+		})
+		return Promise.race([timeout, resdata])
 	}
 }

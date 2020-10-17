@@ -14,6 +14,7 @@ export default class {
 			const size = n - m;
 			let opts: fetchOpts = {
 				timeout: 15e3,
+				readtimeout: 30e3,
 				cache: true,
 			};
 			for (let i = 0; i < retry; i++) {

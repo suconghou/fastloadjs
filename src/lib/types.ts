@@ -18,6 +18,7 @@ export interface httpResponse {
 
 export interface fetchOpts {
 	timeout: number
+	readtimeout: number
 	cache: boolean
 }
 
