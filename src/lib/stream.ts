@@ -46,7 +46,7 @@ export default class {
                 r = this.dataMapArray[this.index]
             }
             if (!r) {
-                await sleep(1000)
+                await sleep(100)
                 continue
             }
             this.index++

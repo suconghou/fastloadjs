@@ -85,8 +85,6 @@ export default class extends fastload {
                     })
                 }
                 this.trigger('ready', this.loaders, dispatchs, initdatas)
-                // ready 后统计界面才渲染,执行的太快统计UI未初始化不能响应
-                await sleep(1e3)
                 for (let f of tasks) {
                     f();
                 }
