@@ -10,10 +10,10 @@ import libwebrtc from '/Users/admin/data/git/repo/rtc/static/js/data'
 const iceServers = {
 	"iceServers": [
 		{
-			urls: "stun:180.76.134.164:3478",
+			urls: "stun:119.29.1.39:3478",
 		},
 		{
-			urls: "turn:180.76.134.164:3478",
+			urls: "turn:119.29.1.39:3478",
 			username: "su",
 			credential: "su"
 		},
@@ -97,7 +97,7 @@ export default class fastload extends event {
 		this.pause(true)
 		this.stream.destroy();
 		this.stream = null
-		clearInterval(this.rtcLoop)
+		this.rtcReset()
 		if (this.refBuffer) {
 			this.refBuffer.q.clear()
 			this.refBuffer = null
@@ -300,6 +300,13 @@ export default class fastload extends event {
 			this.trigger('rtc.stat', stat)
 		})
 
+	}
+
+	private rtcReset() {
+		clearInterval(this.rtcLoop)
+		if (rtc) {
+			rtc.clear()
+		}
 	}
 
 	getResponse(): Response {
