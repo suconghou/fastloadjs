@@ -24,12 +24,12 @@ export default class extends event {
                 if (done) {
                     setTimeout(() => {
                         this.q.push(() => {
-                            return new Promise(async (resolve) => {
+                            return new Promise<void>(async (resolve) => {
                                 this.done = true;
                                 resolve();
                             })
                         })
-                    }, 200)
+                    }, 8e3)
                     doned = true
                 }
             } catch (e) {
@@ -48,12 +48,12 @@ export default class extends event {
     }
 
     wait() {
-        return new Promise(async (resolve) => {
+        return new Promise<void>(async (resolve) => {
             while (true) {
                 if ((this.done && this.update) || this.mediaSource.readyState !== 'open') {
                     return resolve()
                 }
-                await sleep(500)
+                await sleep(5e3)
             }
         })
     }
@@ -78,7 +78,7 @@ export default class extends event {
 
     push(data: any) {
         this.q.push(() => {
-            return new Promise(async (resolve, reject) => {
+            return new Promise<void>(async (resolve, reject) => {
                 while (true) {
                     try {
                         if (this.done) {
