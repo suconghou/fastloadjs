@@ -33,4 +33,5 @@ export interface dispatcher {
 	getMap: Function
 	seekTo: Function
 	done: Function
+	rtcWaitCount: number
 }

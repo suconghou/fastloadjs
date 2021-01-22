@@ -4,7 +4,7 @@ import dispatch from "./dispatch";
 import stream from "./stream";
 import workers from "./workers/index";
 import tasks from "./tasks/index";
-import { event } from './utils/util'
+import { event, sleep } from './utils/util'
 import libwebrtc from '/Users/admin/data/git/repo/rtc/static/js/data'
 
 const iceServers = {
@@ -234,7 +234,7 @@ export default class fastload extends event {
 			)
 		}
 		query(0)
-		this.rtcLoop = setInterval(() => {
+		this.rtcLoop = setInterval(async () => {
 			const item = this.dispatcher.rtcNext()
 			if (!item) {
 				clearInterval(this.rtcLoop)
@@ -258,6 +258,7 @@ export default class fastload extends event {
 			}
 			query(item.no)
 			this.trigger('res.rtc.start', item)
+			await sleep(100 * this.dispatcher.rtcWaitCount)
 		}, 2e3)
 		rtc.listen('buffer.progress', ({ id, i, n, uid }) => {
 			// 传输进行中

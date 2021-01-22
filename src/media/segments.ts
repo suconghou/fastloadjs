@@ -128,4 +128,17 @@ export default class segments {
             console.error("error in done");
         }
     }
+
+    // 计算从当前http下载点到结尾,有多少rtc已探测并等待结果的
+    get rtcWaitCount(): number {
+        let num = 0
+        for (let i = this.index; i < this.total; i++) {
+            const item = this.taskMap[i]
+            if (item && !item.done && item.rstart) {
+                num++
+            }
+        }
+        return num;
+    }
+
 }
