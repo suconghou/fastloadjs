@@ -4,7 +4,7 @@ import dispatch from "./dispatch";
 import stream from "./stream";
 import workers from "./workers/index";
 import tasks from "./tasks/index";
-import { event, sleep } from './utils/util'
+import { event } from './utils/util'
 import libwebrtc from '/Users/admin/data/git/repo/rtc/static/js/data'
 
 const iceServers = {
@@ -44,6 +44,8 @@ export default class fastload extends event {
 
 	private rtcLoop: number;
 
+	private rtcEvcancel: Function = () => { }
+
 	constructor(opts: fastConfig) {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
@@ -80,7 +82,7 @@ export default class fastload extends event {
 		}
 		if (!this.config.nop2p) {
 			if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
-				setTimeout(() => this.rtcInit(), 1e3)
+				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
 			}
 		}
 		return this;
@@ -219,7 +221,7 @@ export default class fastload extends event {
 	}
 
 	private rtcInit() {
-		clearInterval(this.rtcLoop)
+		clearTimeout(this.rtcLoop)
 		const query = (no: number) => {
 			rtc.query(
 				this.config.meta,
@@ -234,33 +236,38 @@ export default class fastload extends event {
 			)
 		}
 		query(0)
-		this.rtcLoop = setInterval(async () => {
-			const item = this.dispatcher.rtcNext()
-			if (!item) {
-				clearInterval(this.rtcLoop)
-				// 没有任务了,终止搜寻,但任更新统计数据
-				this.rtcLoop = setInterval(() => {
-					const stat = rtc.getStats()
-					this.trigger('rtc.stat', stat, rtc.id)
-				}, 2e3)
-				return;
-			}
+		const hasAlivePeer = (stat: any): Boolean => {
 			let alive = false
-			const stat = rtc.getStats()
-			this.trigger('rtc.stat', stat, rtc.id)
 			Object.keys(stat).forEach(k => {
 				if (stat[k].state == 'open') {
 					alive = true
 				}
 			})
-			if (!alive) {
+			return alive
+		}
+		const task = () => {
+			const item = this.dispatcher.rtcNext()
+			const stat = rtc.getStats()
+			this.trigger('rtc.stat', stat, rtc.id)
+			if (!item) {
+				// 没有任务了,终止搜寻,但仍更新统计数据
+				this.rtcLoop = setTimeout(task, 2e3)
 				return
 			}
-			query(item.no)
-			this.trigger('res.rtc.start', item)
-			await sleep(100 * this.dispatcher.rtcWaitCount)
-		}, 2e3)
-		rtc.listen('buffer.progress', ({ id, i, n, uid }) => {
+			if (hasAlivePeer(stat)) {
+				query(item.no)
+				item.rstart = true
+				this.trigger('res.rtc.start', item)
+			}
+			this.rtcLoop = setTimeout(task, 2e3 + 100 * this.dispatcher.rtcWaitCount)
+		}
+		this.rtcLoop = setTimeout(task, 2e3)
+		this.rtcEvcancel = this.rtcEventInit()
+	}
+
+	private rtcEventInit(): Function {
+		const events: Array<Function> = [];
+		const bufferProgress = ({ id, i, n, uid }) => {
 			// 传输进行中
 			const [idtag, index] = id.split('|')
 			if (this.config.meta != idtag) {
@@ -268,8 +275,12 @@ export default class fastload extends event {
 				return;
 			}
 			this.trigger('res.rtc.progress', { i, n, uid, no: index, })
+		}
+		rtc.listen('buffer.progress', bufferProgress)
+		events.push(() => {
+			rtc.remove('buffer.progress', bufferProgress)
 		})
-		rtc.listen('data', ({ id, index, buffer }) => {
+		const data = ({ id, index, buffer }) => {
 			const item = {
 				no: index,
 				data: buffer,
@@ -287,24 +298,46 @@ export default class fastload extends event {
 				this.trigger('res.rtc.done', item)
 			}
 			this.dispatcher.done(item.no)
+		}
+		rtc.listen('data', data)
+		events.push(() => {
+			rtc.remove('data', data)
 		})
-		rtc.listen('open', () => {
+		const open = () => {
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat)
+		}
+		rtc.listen('open', open)
+		events.push(() => {
+			rtc.remove('open', open)
 		})
-		rtc.listen('close', () => {
+		const close = () => {
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat)
+		}
+		rtc.listen('close', close)
+		events.push(() => {
+			rtc.remove('close', close)
 		})
-		rtc.listen('error', () => {
+		const error = () => {
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat)
+		}
+		rtc.listen('error', error)
+		events.push(() => {
+			rtc.remove('error', error)
 		})
-
+		const destroy = () => {
+			for (let fn of events) {
+				fn();
+			}
+		}
+		return destroy
 	}
 
 	private rtcReset() {
-		clearInterval(this.rtcLoop)
+		clearTimeout(this.rtcLoop)
+		this.rtcEvcancel()
 		if (rtc) {
 			rtc.clear()
 		}

@@ -65,19 +65,19 @@ export default class {
         }
     }
 
-    // rtc 任务需要比http任务分离遍历
+    // rtc 任务需要比http任务分离遍历,调用方需修改其rstart属性,将0修改为true,代表确实发出查询了
     rtcNext() {
         for (let i = this.index; i < this.total; i++) {
             const item = this.taskMap[i]
             if (!item.done && !item.rstart && !item.start) {
-                item.rstart = true
+                item.rstart = 0
                 return item;
             }
         }
         for (let i = this.index; i < this.total; i++) {
             const item = this.taskMap[i]
             if (!item.done && !item.rstart) {
-                item.rstart = true
+                item.rstart = 0
                 return item;
             }
         }
