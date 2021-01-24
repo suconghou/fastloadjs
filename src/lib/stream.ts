@@ -1,11 +1,12 @@
 import { sleep } from './utils/util'
+import { httpResponse } from '../lib/types'
 export default class {
 
     private stream: ReadableStream
 
     private index: number = 0
     private dataMap: Object = {}
-    private dataMapArray: Array<any> = []
+    private dataMapArray: Array<httpResponse> = []
 
     private destroyed: boolean;
 
@@ -59,11 +60,11 @@ export default class {
     }
 
     // 提供任意seek能力,方便cachefill
-    item(index: number) {
+    item(index: number): httpResponse {
         return this.dataMap[index]
     }
 
-    push(index: number, data: Object) {
+    push(index: number, data: httpResponse) {
         this.dataMap[index] = data
         this.dataMapArray.push(data)
     }

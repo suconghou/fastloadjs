@@ -34,7 +34,7 @@ export default class fastload extends event {
 	private err: any
 
 	private defaultOpts = {
-		retry: 3,
+		retry: 5,
 		thread: 2,
 		thunk: 524288,
 	}
@@ -159,7 +159,7 @@ export default class fastload extends event {
 			used.push(u)
 			return u
 		}
-		return tasks.wrap(this.config.retry, urlFn, m, n, no)
+		return tasks.wrap(this.config.retry, urlFn, m, n, no, this.stream)
 	}
 
 	// 这个是第二次及以后重试的,排除之前使用的,然后在剩余里随机,如果都使用过,则重新随机
@@ -178,6 +178,8 @@ export default class fastload extends event {
 			// 如果stream都没有了,说明早已destroy了,发出终止信号
 			return true
 		}
+		// 这里都是http的执行结果,res有可能是检测到rtc已OK,放弃执行的
+		// 仅当此任务之前没有执行结果,才使用本次结果
 		const a = this.stream.item(res.no)
 		if (!a) {
 			this.stream.push(res.no, res)
@@ -187,12 +189,14 @@ export default class fastload extends event {
 		}
 		this.dispatcher.done(res.no);
 		if (!this.config.nop2p && this.config.meta != this.config.req) {
-			// 不是indexRange的请求才使用rtc
-			rtc.found(this.config.meta, res.no)
+			// 不是indexRange的请求才使用rtc;仅当已持有正确数据或当前未出错才回应
+			if ((a && !a.err) || (res.data && !res.err)) {
+				rtc.found(this.config.meta, res.no)
+			}
 		}
 
-		if (res.err) {
-			// 经过了多次retry后任然出错,全部终止,事件会通知到上级,需显示错误页面
+		if (!a && res.err) {
+			// 仅当我们使用此结果是我们才关系其错误;经过了多次retry后任然出错,全部终止,事件会通知到上级,需显示错误页面
 			this.err = res.err
 			return true
 		}
@@ -217,7 +221,7 @@ export default class fastload extends event {
 			// 已经被destroy了
 			return
 		}
-		this.stream.push(this.dispatcher.total, { done: true })
+		this.stream.push(this.dispatcher.total, { done: true, data: null, err: null, no: 1e9 })
 	}
 
 	private rtcInit() {
@@ -284,6 +288,7 @@ export default class fastload extends event {
 			const item = {
 				no: index,
 				data: buffer,
+				err: null,
 			}
 			if (!this.stream) {
 				return

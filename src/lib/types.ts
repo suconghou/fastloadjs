@@ -14,6 +14,7 @@ export interface httpResponse {
 	no: number,
 	data: ArrayBuffer,
 	err: any
+	done?: Boolean
 }
 
 export interface fetchOpts {
