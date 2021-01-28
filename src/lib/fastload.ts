@@ -50,7 +50,7 @@ export default class fastload extends event {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
 
-		if (!this.config.nop2p && !rtc) {
+		if (!this.config.nop2p && !rtc && window.RTCPeerConnection) {
 			rtc = new libwebrtc(iceServers)
 			rtc.init()
 		}
