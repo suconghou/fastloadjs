@@ -29,6 +29,10 @@ export default class extends fastload {
     async attach(video: HTMLMediaElement, streams: Array<any>) {
         const mediaSource = new MediaSource;
 
+        let nop2p = this.config.nop2p
+        if (!nop2p && !window.RTCPeerConnection) {
+            nop2p = true
+        }
         const sourceOpen = async () => {
             try {
                 // console.info('source open')
@@ -49,7 +53,7 @@ export default class extends fastload {
                         thread: this.config.thread,
                         meta,
                         mirrors,
-                        nop2p: this.config.nop2p
+                        nop2p: nop2p
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)
