@@ -80,7 +80,7 @@ export default class fastload extends event {
 			}
 			i++;
 		}
-		if (!this.config.nop2p) {
+		if (!this.config.nop2p && window.RTCPeerConnection) {
 			if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
 				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
 			}
@@ -188,7 +188,7 @@ export default class fastload extends event {
 			}, 200)
 		}
 		this.dispatcher.done(res.no);
-		if (!this.config.nop2p && this.config.meta != this.config.req) {
+		if (!this.config.nop2p && window.RTCPeerConnection && this.config.meta != this.config.req) {
 			// 不是indexRange的请求才使用rtc;仅当已持有正确数据或当前未出错才回应
 			if ((a && !a.err) || (res.data && !res.err)) {
 				rtc.found(this.config.meta, res.no)
@@ -241,13 +241,12 @@ export default class fastload extends event {
 		}
 		query(0)
 		const hasAlivePeer = (stat: any): Boolean => {
-			let alive = false
-			Object.keys(stat).forEach(k => {
-				if (stat[k].state == 'open') {
-					alive = true
+			for (let item of stat) {
+				if (item.state == 'open') {
+					return true
 				}
-			})
-			return alive
+			}
+			return false;
 		}
 		const task = () => {
 			const item = this.dispatcher.rtcNext()
@@ -285,7 +284,7 @@ export default class fastload extends event {
 			rtc.remove('buffer.progress', bufferProgress)
 		})
 		const data = ({ id, index, buffer }) => {
-			const item = {
+			const item: httpResponse = {
 				no: index,
 				data: buffer,
 				err: null,
@@ -297,7 +296,7 @@ export default class fastload extends event {
 				return;
 			}
 			const a = this.stream.item(index)
-			if (!a) {
+			if (!a || a.err) {
 				this.stream.push(item.no, item)
 				rtc.found(this.config.meta, item.no)
 				this.trigger('res.rtc.done', item)
@@ -308,29 +307,21 @@ export default class fastload extends event {
 		events.push(() => {
 			rtc.remove('data', data)
 		})
-		const open = () => {
+		const statsUpdate = () => {
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat)
 		}
-		rtc.listen('open', open)
+		rtc.listen('open', statsUpdate)
 		events.push(() => {
-			rtc.remove('open', open)
+			rtc.remove('open', statsUpdate)
 		})
-		const close = () => {
-			const stat = rtc.getStats()
-			this.trigger('rtc.stat', stat)
-		}
-		rtc.listen('close', close)
+		rtc.listen('close', statsUpdate)
 		events.push(() => {
-			rtc.remove('close', close)
+			rtc.remove('close', statsUpdate)
 		})
-		const error = () => {
-			const stat = rtc.getStats()
-			this.trigger('rtc.stat', stat)
-		}
-		rtc.listen('error', error)
+		rtc.listen('error', statsUpdate)
 		events.push(() => {
-			rtc.remove('error', error)
+			rtc.remove('error', statsUpdate)
 		})
 		const destroy = () => {
 			for (let fn of events) {

@@ -2,6 +2,7 @@ export default class {
 
     private taskMap: any = {}
     private index: number = 0
+    public readonly total: number = 0
 
     constructor(thunk: number, start: number, end: number) {
         if (!isFinite(start) || !isFinite(end) || start > end) {
@@ -31,13 +32,8 @@ export default class {
             x = n
             no++
         }
+        this.total = Object.keys(this.taskMap).length
     }
-
-
-    get total(): number {
-        return Object.keys(this.taskMap).length
-    }
-
 
     // 此处需要轮询一遍,查漏
     next() {

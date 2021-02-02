@@ -50,6 +50,7 @@ export default class segments {
 
     private taskMap: any = {}
     private index: number = 0
+    public readonly total: number = 0
 
     constructor(buffer: ArrayBuffer, indexEndoffset: number, totalLen: any, webm: boolean) {
         const s = new parser(new DataView(buffer), !webm)
@@ -59,12 +60,8 @@ export default class segments {
         } else {
             this.taskMap = sidxTasks(info);
         }
+        this.total = Object.keys(this.taskMap).length
     }
-
-    get total(): number {
-        return Object.keys(this.taskMap).length
-    }
-
 
     // 此处需要轮询一遍,查漏
     next() {
