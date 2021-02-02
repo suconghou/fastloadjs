@@ -241,8 +241,8 @@ export default class fastload extends event {
 		}
 		query(0)
 		const hasAlivePeer = (stat: any): Boolean => {
-			for (let item of stat) {
-				if (item.state == 'open') {
+			for (let key in stat) {
+				if (stat[key] && stat[key].state == 'open') {
 					return true
 				}
 			}
