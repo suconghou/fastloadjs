@@ -39,6 +39,8 @@ export default class fastload extends event {
 		thunk: 524288,
 	}
 
+	private initial = false;
+
 	// 由外部注入,提供直接操作sourceBuffer的入口
 	public refBuffer: bufferController
 
@@ -58,6 +60,7 @@ export default class fastload extends event {
 		}
 	}
 
+	// 此API仅调能用一次
 	public start(pause: boolean) {
 		const { thread, thunk, start, end, retry } = this.config
 		if (!this.dispatcher) {
@@ -71,19 +74,11 @@ export default class fastload extends event {
 		}, () => {
 			this.taskFinish()
 		})
-		this.worker.pause = pause
-
-		let i = 0
-		while (i < thread) {
-			const items = this.dispatcher.next(1)
-			// 如果没有下一个说明任务都派发完了
-			if (items.length) {
-				const item = items[0]
-				this.worker.push(this.taskWrap(item))
-				item.start = +new Date()
-			}
-			i++;
+		if (!pause) {
+			this.init()
+			this.initial = true
 		}
+		this.worker.pause = pause
 		if (!this.config.nop2p && window.RTCPeerConnection) {
 			if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
 				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
@@ -95,6 +90,26 @@ export default class fastload extends event {
 	public pause(pause: boolean) {
 		if (this.worker) {
 			this.worker.pause = pause
+		}
+		if (!pause && !this.initial) {
+			this.init()
+			this.initial = true
+		}
+	}
+
+	private init() {
+		const { thread, } = this.config
+		let i = 0
+		while (i < thread) {
+			const items = this.dispatcher.next(1)
+			// 如果没有下一个说明任务都派发完了
+			if (items.length) {
+				const item = items[0]
+				this.worker.push(this.taskWrap(item))
+				this.trigger('res.start', item)
+				item.start = +new Date()
+			}
+			i++;
 		}
 	}
 
