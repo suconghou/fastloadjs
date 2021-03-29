@@ -64,7 +64,7 @@ export default class segments {
         this.total = Object.keys(this.taskMap).length
     }
 
-    next(n: number = 5): Array<taskItem> {
+    next(n: number = 10): Array<taskItem> {
         const resList: Array<taskItem> = [];
         const max = Math.min(this.index + n, this.total);
         let constant = true;

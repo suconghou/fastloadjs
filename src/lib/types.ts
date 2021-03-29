@@ -28,7 +28,11 @@ export interface requestBuilder {
 }
 
 interface nextFunction extends Function {
-	(n?: number): Array<taskItem>
+	(n: number): Array<taskItem>
+}
+
+export interface fetchTask extends Function {
+	(): Promise<httpResponse>
 }
 
 export interface dispatcher {

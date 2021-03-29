@@ -1,4 +1,4 @@
-import { fastConfig, httpResponse, dispatcher, taskItem } from "./types";
+import { fastConfig, httpResponse, dispatcher, taskItem, fetchTask } from "./types";
 import bufferController from './buffer'
 import dispatch from "./dispatch";
 import stream from "./stream";
@@ -75,10 +75,12 @@ export default class fastload extends event {
 
 		let i = 0
 		while (i < thread) {
-			const item = this.dispatcher.next()
+			const items = this.dispatcher.next(1)
 			// 如果没有下一个说明任务都派发完了
-			if (item) {
+			if (items.length) {
+				const item = items[0]
 				this.worker.push(this.taskWrap(item))
+				item.start = +new Date()
 			}
 			i++;
 		}
@@ -143,7 +145,7 @@ export default class fastload extends event {
 	}
 
 	// 处理mirrors负载策略
-	private taskWrap(item: any): Function {
+	private taskWrap(item: taskItem): fetchTask {
 		const { m, n, no } = item
 		let i = 0;
 		const used: Array<RequestInfo> = []
@@ -205,11 +207,12 @@ export default class fastload extends event {
 			return true;
 		}
 
-		const items: Array<taskItem> = this.dispatcher.next()
+		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
 			// 没有任务了,发出终止信息
 			return true;
 		}
+		const t = +new Date()
 		if (!this.rtcFound) {
 			for (let item of items) {
 				if (item.start) {
@@ -217,11 +220,11 @@ export default class fastload extends event {
 				}
 				this.worker.push(this.taskWrap(item))
 				this.trigger('res.start', item)
+				item.start = t
 				return false;
 			}
 		}
 		// 如果发现此资源存在rtc
-		const t = +new Date()
 		let nextItem: taskItem;
 		for (let item of items) {
 			if (item.start) {
@@ -239,12 +242,12 @@ export default class fastload extends event {
 				nextItem = item;
 			}
 		}
-		if (!nextItem) {
-			console.error("not found next item")
-			nextItem = items[0]
+		if (nextItem) {
+			this.worker.push(this.taskWrap(nextItem))
+			this.trigger('res.start', nextItem)
+			nextItem.start = t
 		}
-		this.worker.push(this.taskWrap(nextItem))
-		this.trigger('res.start', nextItem)
+		// 没有查询到需要执行的任务,比如说最后就查到一条任务,已经在执行了.本次就不下发新任务了
 	}
 
 
@@ -281,7 +284,7 @@ export default class fastload extends event {
 			return false;
 		}
 		const task = () => {
-			const items: Array<taskItem> = this.dispatcher.next()
+			const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat, rtc.id)
 			if (!items.length) {

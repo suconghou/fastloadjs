@@ -2,14 +2,14 @@
 import fetcher from '../fetcher/index'
 import stream from "../stream";
 import { sleep, } from '../../lib/utils/util'
-import { httpResponse, fetchOpts } from '../types'
+import { httpResponse, fetchOpts, fetchTask } from '../types'
 
 export default class {
 	constructor() {
 
 	}
 	// 再此处理重试逻辑, 此处校验数据, 此处的n值,实际在range时,需要-1
-	static wrap(retry: number, urlFn: (() => RequestInfo), m: number, n: number, no: number, stream: stream): Function {
+	static wrap(retry: number, urlFn: (() => RequestInfo), m: number, n: number, no: number, stream: stream): fetchTask {
 		return async (): Promise<httpResponse> => {
 			let res: httpResponse = { no: no, data: null, err: null };
 			let url: RequestInfo;
