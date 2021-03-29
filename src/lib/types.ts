@@ -27,12 +27,27 @@ export interface requestBuilder {
 	(req: RequestInfo, start: number, end: number): Request;
 }
 
+interface nextFunction extends Function {
+	(n?: number): Array<taskItem>
+}
+
 export interface dispatcher {
 	total: number
-	next: Function
-	rtcNext: Function
+	next: nextFunction
 	getMap: Function
 	seekTo: Function
 	done: Function
-	rtcWaitCount: number
+}
+
+export interface taskItem {
+	m: number
+	n: number
+	no: number
+	begin: number
+	done: Boolean
+	start: number
+	rstart: number
+}
+export interface taskItemMap<T> {
+	[key: number]: T;
 }

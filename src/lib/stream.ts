@@ -10,7 +10,7 @@ export default class {
 
     private destroyed: boolean;
 
-    constructor(private init: ResponseInit, private order: boolean) {
+    constructor(private init: ResponseInit) {
         const _this = this;
         const process = async (c: ReadableStreamDefaultController) => {
             const { data, done, err } = await _this.get()
@@ -38,14 +38,9 @@ export default class {
     private async get() {
         while (true) {
             if (this.destroyed) {
-                return { done: true }
+                return { done: true, err: null, data: null }
             }
-            let r: any;
-            if (this.order) {
-                r = this.dataMap[this.index]
-            } else {
-                r = this.dataMapArray[this.index]
-            }
+            const r = this.dataMapArray[this.index]
             if (!r) {
                 await sleep(100)
                 continue

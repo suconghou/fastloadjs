@@ -1,4 +1,4 @@
-import { fastConfig, httpResponse, dispatcher } from "./types";
+import { fastConfig, httpResponse, dispatcher, taskItem } from "./types";
 import bufferController from './buffer'
 import dispatch from "./dispatch";
 import stream from "./stream";
@@ -46,6 +46,8 @@ export default class fastload extends event {
 
 	private rtcEvcancel: Function = () => { }
 
+	private rtcFound: number = 0;
+
 	constructor(opts: fastConfig) {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
@@ -62,7 +64,7 @@ export default class fastload extends event {
 			this.dispatcher = new dispatch(thunk, Number(start), Number(end))
 		}
 
-		this.stream = new stream(null, false)
+		this.stream = new stream(null)
 
 		this.worker = new workers(thread, retry, (res: httpResponse) => {
 			return this.taskDone(res)
@@ -172,8 +174,8 @@ export default class fastload extends event {
 	}
 
 	// 一个任务完成了,收集这个任务结果,然后派发下个任务,如果任务出错,则终止
-	// 需要反馈给dispatch,以便dispatch查漏
-	private taskDone(res: httpResponse) {
+	// 需要反馈给dispatch,以便dispatch查询后续哪些是未完成的
+	private async taskDone(res: httpResponse): Promise<boolean> {
 		if (!this.stream) {
 			// 如果stream都没有了,说明早已destroy了,发出终止信号
 			return true
@@ -183,9 +185,7 @@ export default class fastload extends event {
 		const a = this.stream.item(res.no)
 		if (!a) {
 			this.stream.push(res.no, res)
-			setTimeout(() => {
-				this.trigger('res.done', res)
-			}, 200)
+			this.trigger('res.done', res)
 		}
 		this.dispatcher.done(res.no);
 		if (!this.config.nop2p && window.RTCPeerConnection && this.config.meta != this.config.req) {
@@ -196,7 +196,7 @@ export default class fastload extends event {
 		}
 
 		if (!a && res.err) {
-			// 仅当我们使用此结果是我们才关系其错误;经过了多次retry后任然出错,全部终止,事件会通知到上级,需显示错误页面
+			// 仅当我们使用此结果时我们才关心其错误;经过了多次retry后任然出错,全部终止,事件会通知到上级,需显示错误页面
 			this.err = res.err
 			return true
 		}
@@ -205,14 +205,46 @@ export default class fastload extends event {
 			return true;
 		}
 
-		const item = this.dispatcher.next()
-		if (item) {
-			this.worker.push(this.taskWrap(item))
-			this.trigger('res.start', item)
-		} else {
+		const items: Array<taskItem> = this.dispatcher.next()
+		if (!items.length) {
 			// 没有任务了,发出终止信息
-			return true
+			return true;
 		}
+		if (!this.rtcFound) {
+			for (let item of items) {
+				if (item.start) {
+					continue;
+				}
+				this.worker.push(this.taskWrap(item))
+				this.trigger('res.start', item)
+				return false;
+			}
+		}
+		// 如果发现此资源存在rtc
+		const t = +new Date()
+		let nextItem: taskItem;
+		for (let item of items) {
+			if (item.start) {
+				continue;
+			}
+			// 寻找一个rtc探测很久还没结果的资源
+			if (!item.rstart) {
+				nextItem = item;
+				break
+			}
+			if (!nextItem) {
+				nextItem = item;
+			}
+			if (t - item.rstart > t - nextItem.rstart) {
+				nextItem = item;
+			}
+		}
+		if (!nextItem) {
+			console.error("not found next item")
+			nextItem = items[0]
+		}
+		this.worker.push(this.taskWrap(nextItem))
+		this.trigger('res.start', nextItem)
 	}
 
 
@@ -249,20 +281,41 @@ export default class fastload extends event {
 			return false;
 		}
 		const task = () => {
-			const item = this.dispatcher.rtcNext()
+			const items: Array<taskItem> = this.dispatcher.next()
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat, rtc.id)
-			if (!item) {
+			if (!items.length) {
 				// 没有任务了,终止搜寻,但仍更新统计数据
 				this.rtcLoop = setTimeout(task, 2e3)
 				return
 			}
 			if (hasAlivePeer(stat)) {
-				query(item.no)
-				item.rstart = true
-				this.trigger('res.rtc.start', item)
+				const t = +new Date()
+				let nextItem: taskItem;
+				for (let item of items) {
+					if (item.rstart) {
+						continue;
+					}
+					// 寻找一个http还未开始下载的,或http已下载很久没有完成的
+					if (!item.start) {
+						nextItem = item
+						break;
+					}
+					if (!nextItem) {
+						nextItem = item
+					}
+					if (t - item.start > t - nextItem.start) {
+						nextItem = item;
+					}
+				}
+				if (nextItem) {
+					query(nextItem.no)
+					nextItem.rstart = t
+					this.trigger('res.rtc.start', nextItem)
+				}
 			}
-			this.rtcLoop = setTimeout(task, 2e3 + 100 * this.dispatcher.rtcWaitCount)
+			const slow = (this.worker && this.worker.pause) ? 5e3 : 0;
+			this.rtcLoop = setTimeout(task, slow + 2e3)
 		}
 		this.rtcLoop = setTimeout(task, 2e3)
 		this.rtcEvcancel = this.rtcEventInit()
@@ -295,13 +348,14 @@ export default class fastload extends event {
 			if (this.config.meta != id) {
 				return;
 			}
+			this.rtcFound++;
+			rtc.found(this.config.meta, index)
 			const a = this.stream.item(index)
 			if (!a || a.err) {
-				this.stream.push(item.no, item)
-				rtc.found(this.config.meta, item.no)
+				this.stream.push(index, item)
 				this.trigger('res.rtc.done', item)
 			}
-			this.dispatcher.done(item.no)
+			this.dispatcher.done(index)
 		}
 		rtc.listen('data', data)
 		events.push(() => {

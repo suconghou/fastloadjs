@@ -1,3 +1,5 @@
+import { taskItem, taskItemMap } from './types'
+
 export default class {
 
     private taskMap: any = {}
@@ -35,51 +37,27 @@ export default class {
         this.total = Object.keys(this.taskMap).length
     }
 
-    // 此处需要轮询一遍,查漏
-    next() {
-        const r = this.taskMap[this.index]
-        if (r && !r.done && !(r.start || r.rstart)) {
-            this.index++
-            r.start = true
-            return r
-        }
-        // 查找跳过的
-        for (let i = this.index; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (!item.done && !item.start) {
-                item.start = true
-                this.index = item.no + 1
-                return item;
+    next(n: number = 5): Array<taskItem> {
+        const resList: Array<taskItem> = [];
+        const max = Math.min(this.index + n, this.total);
+        let constant = true;
+        let nextIndex = this.index;
+        for (let i = this.index; i < max; i++) {
+            const item = this.taskMap[i];
+            if (item.done) {
+                if (constant) {
+                    nextIndex = item.no + 1;
+                }
+                continue;
             }
+            constant = false;
+            resList.push(item);
         }
-        for (let i = 0; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (!item.done && !item.start) {
-                item.start = true
-                return item;
-            }
-        }
+        this.index = nextIndex;
+        return resList;
     }
 
-    // rtc 任务需要比http任务分离遍历,调用方需修改其rstart属性,将0修改为true,代表确实发出查询了
-    rtcNext() {
-        for (let i = this.index; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (!item.done && !item.rstart && !item.start) {
-                item.rstart = 0
-                return item;
-            }
-        }
-        for (let i = this.index; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (!item.done && !item.rstart) {
-                item.rstart = 0
-                return item;
-            }
-        }
-    }
-
-    getMap() {
+    getMap(): taskItemMap<taskItem> {
         return this.taskMap;
     }
 
@@ -96,18 +74,6 @@ export default class {
         } else {
             console.error("error in done");
         }
-    }
-
-    // 计算从当前http下载点到结尾,有多少rtc已探测并等待结果的
-    get rtcWaitCount(): number {
-        let num = 0
-        for (let i = this.index; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (item && !item.done && item.rstart) {
-                num++
-            }
-        }
-        return num;
     }
 
 }
