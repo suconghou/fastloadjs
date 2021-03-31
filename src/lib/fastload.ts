@@ -4,7 +4,7 @@ import dispatch from "./dispatch";
 import stream from "./stream";
 import workers from "./workers/index";
 import tasks from "./tasks/index";
-import { event } from './utils/util'
+import { event, sleep } from './utils/util'
 import libwebrtc from '/Users/admin/data/git/repo/rtc/static/js/data'
 
 const iceServers = {
@@ -101,13 +101,17 @@ export default class fastload extends event {
 		const { thread, } = this.config
 		let i = 0
 		while (i < thread) {
-			const items = this.dispatcher.next(1)
+			const items = this.dispatcher.next(10 + thread)
 			// 如果没有下一个说明任务都派发完了
 			if (items.length) {
-				const item = items[0]
-				this.worker.push(this.taskWrap(item))
-				this.trigger('res.start', item)
-				item.start = +new Date()
+				for (let item of items) {
+					if (!item.start) {
+						this.worker.push(this.taskWrap(item))
+						this.trigger('res.start', item)
+						item.start = +new Date()
+						break;
+					}
+				}
 			}
 			i++;
 		}
@@ -197,6 +201,10 @@ export default class fastload extends event {
 			// 如果stream都没有了,说明早已destroy了,发出终止信号
 			return true
 		}
+		if (res.no === -1) {
+			// 是我们轮询的空任务,就继续检测下次任务
+			return this.triggerNextTask();
+		}
 		// 这里都是http的执行结果,res有可能是检测到rtc已OK,放弃执行的
 		// 仅当此任务之前没有执行结果,才使用本次结果
 		const a = this.stream.item(res.no)
@@ -221,7 +229,10 @@ export default class fastload extends event {
 			// 一旦出错,不能跳过,必须全部终止
 			return true;
 		}
+		return this.triggerNextTask();
+	}
 
+	private async triggerNextTask(): Promise<boolean> {
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
 			// 没有任务了,发出终止信息
@@ -261,8 +272,14 @@ export default class fastload extends event {
 			this.worker.push(this.taskWrap(nextItem))
 			this.trigger('res.start', nextItem)
 			nextItem.start = t
+			return false;
 		}
-		// 没有查询到需要执行的任务,比如说最后就查到一条任务,已经在执行了.本次就不下发新任务了
+		// 没有查询到需要执行的任务,比如说最后就查到一条任务,已经在执行了.
+		// 或者某个任务卡住很久,当前window下,都是在执行的了,本次就轮询空任务,下次回调时,会检测任务是否已全部完成的.
+		this.worker.push(async (): Promise<httpResponse> => {
+			await sleep(200)
+			return { no: -1, data: null, err: null };
+		})
 	}
 
 

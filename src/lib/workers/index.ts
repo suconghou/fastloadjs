@@ -1,9 +1,10 @@
 import { sleep } from '../utils/util'
+import { fetchTask } from '../types'
 
 export default class {
 
 	private t: number = 0
-	private tasks: Array<Function> = []
+	private tasks: Array<fetchTask> = []
 	public pause: boolean = false;
 
 	constructor(private threadNum: number, private retry: number, private callback: Function, private finish: Function) {
@@ -36,7 +37,7 @@ export default class {
 		this.taskDone();
 	}
 
-	push(task: Function) {
+	push(task: fetchTask) {
 		this.tasks.push(task)
 		if (this.t < this.threadNum) {
 			this.thread(this.t)
@@ -44,7 +45,7 @@ export default class {
 		}
 	}
 
-	private get(): Function {
+	private get(): fetchTask {
 		return this.tasks.pop()
 	}
 
@@ -61,7 +62,7 @@ export default class {
 		}
 	}
 
-	private async do(task: Function) {
+	private async do(task: fetchTask) {
 		const retry = this.retry
 		let res: any = {};
 		for (let i = 0; i < retry; i++) {
