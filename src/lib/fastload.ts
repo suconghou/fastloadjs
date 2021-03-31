@@ -79,11 +79,6 @@ export default class fastload extends event {
 			this.initial = true
 		}
 		this.worker.pause = pause
-		if (!this.config.nop2p && window.RTCPeerConnection) {
-			if (!this.rtcLoop && pause !== false && this.config.meta != this.config.req) {
-				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
-			}
-		}
 		return this;
 	}
 
@@ -114,6 +109,11 @@ export default class fastload extends event {
 				}
 			}
 			i++;
+		}
+		if (!this.config.nop2p && window.RTCPeerConnection) {
+			if (!this.rtcLoop && this.config.meta != this.config.req) {
+				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
+			}
 		}
 	}
 
@@ -306,7 +306,6 @@ export default class fastload extends event {
 				}
 			)
 		}
-		query(0)
 		const hasAlivePeer = (stat: any): Boolean => {
 			for (let key in stat) {
 				if (stat[key] && stat[key].state == 'open') {
@@ -352,7 +351,7 @@ export default class fastload extends event {
 			const slow = (this.worker && this.worker.pause) ? 5e3 : 0;
 			this.rtcLoop = setTimeout(task, slow + 2e3)
 		}
-		this.rtcLoop = setTimeout(task, 2e3)
+		this.rtcLoop = setTimeout(task, 0)
 		this.rtcEvcancel = this.rtcEventInit()
 	}
 
