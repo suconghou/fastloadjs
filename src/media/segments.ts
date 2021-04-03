@@ -84,6 +84,16 @@ export default class segments {
         return resList;
     }
 
+    isDone(): boolean {
+        for (let i = this.index; i < this.total; i++) {
+            const item = this.taskMap[i]
+            if (!item.done) {
+                return false;
+            }
+        }
+        return true
+    }
+
     getMap(): taskItemMap<taskItem> {
         return this.taskMap;
     }

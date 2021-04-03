@@ -41,6 +41,7 @@ export interface dispatcher {
 	getMap: Function
 	seekTo: Function
 	done: Function
+	isDone: Function
 }
 
 export interface taskItem {

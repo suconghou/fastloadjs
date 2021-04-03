@@ -235,8 +235,8 @@ export default class fastload extends event {
 	private async triggerNextTask(): Promise<boolean> {
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
-			// 没有任务了,发出终止信息
-			return true;
+			// 只能表明当前window下,没有需要发起请求的了,我们还需要检测是否后续的都已完成
+			return this.dispatcher.isDone();
 		}
 		const t = +new Date()
 		if (!this.rtcFound) {
