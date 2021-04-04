@@ -236,7 +236,15 @@ export default class fastload extends event {
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
 			// 只能表明当前window下,没有需要发起请求的了,我们还需要检测是否后续的都已完成
-			return this.dispatcher.isDone();
+			const done = this.dispatcher.isDone();
+			if (done) {
+				return true
+			}
+			this.worker.push(async (): Promise<httpResponse> => {
+				await sleep(200)
+				return { no: -1, data: null, err: null };
+			})
+			return false
 		}
 		const t = +new Date()
 		if (!this.rtcFound) {
