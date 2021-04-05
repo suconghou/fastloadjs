@@ -58,7 +58,7 @@ export default class {
     }
 
     isDone(): boolean {
-        for (let i = this.index; i < this.total; i++) {
+        for (let i = 0; i < this.total; i++) {
             const item = this.taskMap[i]
             if (!item.done) {
                 return false;

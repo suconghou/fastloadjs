@@ -235,7 +235,8 @@ export default class fastload extends event {
 	private async triggerNextTask(): Promise<boolean> {
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
-			// 只能表明当前window下,没有需要发起请求的了,我们还需要检测是否后续的都已完成
+			// 只能表明当前window下,没有需要发起请求的了,
+			// 我们还需要检测是否所有都已完成,如果没有全部完成,我们是不能停掉下载线程的,只能空轮询
 			const done = this.dispatcher.isDone();
 			if (done) {
 				return true
