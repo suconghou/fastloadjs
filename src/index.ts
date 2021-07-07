@@ -167,25 +167,6 @@ export default class extends fastload {
         this.loaders.forEach(item => item.seekTo(time))
     }
 
-    async save(fileName: string) {
-        const res = this.getResponse()
-        const blob = await res.blob()
-
-        if (window.navigator.msSaveOrOpenBlob) {
-            return navigator.msSaveBlob(blob, fileName);
-        }
-        const link = document.createElement('a');
-        link.style.display = 'none';
-        link.href = window.URL.createObjectURL(blob);
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(function () {
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(link.href);
-        }, 200);
-
-    }
 }
 
 

@@ -4,8 +4,7 @@ export default class {
 
     private stream: ReadableStream
 
-    private index: number = 0
-    private dataMap: Object = {}
+    private dataMap: { [name: number]: httpResponse } = {}
     private dataMapArray: Array<httpResponse> = []
 
     private destroyed: boolean;
@@ -40,12 +39,11 @@ export default class {
             if (this.destroyed) {
                 return { done: true, err: null, data: null }
             }
-            const r = this.dataMapArray[this.index]
+            const r = this.dataMapArray.shift()
             if (!r) {
                 await sleep(100)
                 continue
             }
-            this.index++
             return r
         }
     }
