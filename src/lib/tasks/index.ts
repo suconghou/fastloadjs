@@ -40,6 +40,7 @@ export default class {
 					console.error(e, i, url, m, n, no)
 					res = { no: no, err: e, data: null }
 					await sleep(2e3)
+					opts.timeout += 5e3;
 				}
 			}
 			return res;
