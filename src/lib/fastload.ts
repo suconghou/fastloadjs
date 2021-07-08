@@ -406,13 +406,13 @@ export default class fastload extends event {
 				return;
 			}
 			this.rtcFound++;
-			rtc.found(this.config.meta, index)
 			const a = this.stream.item(index)
 			if (!a || a.err) {
 				this.stream.push(index, item)
 				this.trigger('res.rtc.done', item)
 			}
 			this.dispatcher.done(index)
+			rtc.found(this.config.meta, index)
 		}
 		rtc.listen('data', data)
 		events.push(() => {
