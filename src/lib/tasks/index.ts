@@ -34,6 +34,7 @@ export default class {
 				} catch (e) {
 					// 如果这次下载失败,但是我们检查结果,可能rtc已经成功了,放弃本次http任务
 					if (stream.item(no)) {
+						console.info("http error but rtc ok", m, n, no)
 						return res
 					}
 					opts.cache = false

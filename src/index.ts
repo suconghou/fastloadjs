@@ -125,6 +125,7 @@ export default class extends fastload {
                     } else {
                         this.start()
                     }
+                    this.setBufferHealth(cached)
                     return
                 }
             }
@@ -138,6 +139,11 @@ export default class extends fastload {
 
     public pause() {
         this.loaders.forEach(item => item.pause(true))
+        return this;
+    }
+
+    public setBufferHealth(t: number) {
+        this.loaders.forEach(item => item.setBufferHealth(t))
         return this;
     }
 

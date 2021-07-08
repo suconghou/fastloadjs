@@ -50,6 +50,8 @@ export default class fastload extends event {
 
 	private rtcFound: number = 0;
 
+	private bufferHealth: number = 0;
+
 	constructor(opts: fastConfig) {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
@@ -90,6 +92,10 @@ export default class fastload extends event {
 			this.init()
 			this.initial = true
 		}
+	}
+
+	public setBufferHealth(t: number) {
+		this.bufferHealth = t;
 	}
 
 	private init() {
@@ -233,6 +239,10 @@ export default class fastload extends event {
 	}
 
 	private async triggerNextTask(): Promise<boolean> {
+		// 当buffer充足时,并且当前资源有rtc,我们派发下一个任务慢一下,使http少工作一些,最大可能发挥P2P
+		if (this.rtcFound && this.bufferHealth > 120) {
+			await sleep(1e3 * (this.bufferHealth / 60)) // 每60秒buffer换取1秒延时
+		}
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
 		if (!items.length) {
 			// 只能表明当前window下,没有需要发起请求的了,
@@ -267,12 +277,14 @@ export default class fastload extends event {
 			}
 			// 寻找一个rtc探测很久还没结果的资源
 			if (!item.rstart) {
+				// 抢占任务,rtc没执行,http就抢占了
 				nextItem = item;
 				break
 			}
 			if (!nextItem) {
 				nextItem = item;
 			}
+			// 找到最左侧,rtc已开始但是没完成的那个
 			if (t - item.rstart > t - nextItem.rstart) {
 				nextItem = item;
 			}
@@ -341,12 +353,14 @@ export default class fastload extends event {
 					}
 					// 寻找一个http还未开始下载的,或http已下载很久没有完成的
 					if (!item.start) {
+						// http没执行,rtc抢占到此任务
 						nextItem = item
 						break;
 					}
 					if (!nextItem) {
 						nextItem = item
 					}
+					// 找到最左侧,http已开始,但是没完成的那个
 					if (t - item.start > t - nextItem.start) {
 						nextItem = item;
 					}
