@@ -36,7 +36,7 @@ function sidxTasks(info: any) {
         const item = info.references[i]
         const no = i;
         const m = item.startRange
-        const n = item.endRange // 因为我们的requestBuilder有end-1的操作,所以我们这里+1;
+        const n = item.endRange
         const begin = item.startTimeSec;
         taskMap[no] = {
             m,
