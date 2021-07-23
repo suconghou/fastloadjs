@@ -2,6 +2,8 @@ import parser from '/Users/admin/data/git/youtubeproxy/mediaparse/src/index'
 
 import { taskItem, taskItemMap } from '../lib/types'
 
+// 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
+// m的开始值是 indexEndoffset+1, n的结束值是文件大小
 function webmTasks(info: any, indexEndoffset: number, len: number) {
     const taskMap = {};
     const first = info[0];
@@ -27,14 +29,14 @@ function webmTasks(info: any, indexEndoffset: number, len: number) {
     return taskMap;
 }
 
-
+// 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
 function sidxTasks(info: any) {
     const taskMap = {}
     for (let i = 0; i < info.reference_count; i++) {
         const item = info.references[i]
         const no = i;
         const m = item.startRange
-        const n = item.endRange + 1
+        const n = item.endRange // 因为我们的requestBuilder有end-1的操作,所以我们这里+1;
         const begin = item.startTimeSec;
         taskMap[no] = {
             m,
