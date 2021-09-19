@@ -240,7 +240,7 @@ export default class fastload extends event {
 
 	private async triggerNextTask(): Promise<boolean> {
 		// 当buffer充足时,并且当前资源有rtc,我们派发下一个任务慢一下,使http少工作一些,最大可能发挥P2P
-		if (this.rtcFound && this.bufferHealth > 120) {
+		if (this.rtcFound && this.bufferHealth > 60) {
 			await sleep(1e3 * (this.bufferHealth / 60)) // 每60秒buffer换取1秒延时
 		}
 		const items: Array<taskItem> = this.dispatcher.next(10 + this.config.thread)
