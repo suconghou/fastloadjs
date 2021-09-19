@@ -30,8 +30,8 @@ export default class fetcher {
 
 	// 解析成stream能识别的格式
 	private static async parse(res: Response, opts: fetchOpts): Promise<httpResponse> {
-		if (![200, 206, 304].includes(res.status)) {
-			throw new Error(res.statusText)
+		if (!res.ok) {
+			throw new Error(`${res.url} : ${res.statusText || res.status}`)
 		}
 		const timeout: Promise<httpResponse> = new Promise((resolve, reject) => {
 			setTimeout(() => {
