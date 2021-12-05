@@ -36,7 +36,7 @@ it fetch datas from
 
 you can use it directly from cdn address
 
-`https://cdn.jsdelivr.net/combine/npm/vue@2.6.11/dist/vue.min.js,npm/vue-router@3.1.6/dist/vue-router.min.js,npm/axios@0.19.2/dist/axios.min.js,gh/suconghou/assets@c7e2e06/fastload.min.js`
+`https://cdn.jsdelivr.net/combine/npm/vue@2.6.11/dist/vue.min.js,npm/vue-router@3.1.6/dist/vue-router.min.js,npm/axios@0.19.2/dist/axios.min.js,gh/suconghou/assets@8a64290/fastload.min.js`
 
 just like u2web does.
 
