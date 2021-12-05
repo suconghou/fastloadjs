@@ -38,30 +38,30 @@
         const streams = [
             {
                 req: "https://stream.pull.workers.dev/video/CIdmGhyuayw/247.webm",
-                "mimeCodec": "video/webm; codecs=\"vp9\"",
-                "len": 9067591,
-                "init": {
-                    "start": 0,
-                    "end": 219
+                mimeCodec: "video/webm; codecs=\"vp9\"",
+                len: 9067591,
+                init: {
+                    start: 0,
+                    end: 219
                 },
-                "index": {
-                    "start": 220,
-                    "end": 957
+                index: {
+                    start: 220,
+                    end: 957
                 },
                 meta: "CIdmGhyuayw:247",
                 mirrors: ["https://stream.pull.workers.dev/video/CIdmGhyuayw/247.webm"]
             },
             {
                 req: "https://stream.pull.workers.dev/video/CIdmGhyuayw/249.webm",
-                "mimeCodec": "audio/webm; codecs=\"opus\"",
-                "len": 1364720,
-                "init": {
-                    "start": 0,
-                    "end": 258
+                mimeCodec: "audio/webm; codecs=\"opus\"",
+                len: 1364720,
+                init: {
+                    start: 0,
+                    end: 258
                 },
-                "index": {
-                    "start": 259,
-                    "end": 628
+                index: {
+                    start: 259,
+                    end: 628
                 },
                 meta: "CIdmGhyuayw:249",
                 mirrors: ["https://stream.pull.workers.dev/video/CIdmGhyuayw/249.webm"]
@@ -70,7 +70,7 @@
         ];
         const v = document.querySelector('#video')
         loader.attach(v, streams);
-        v.addEventListener('metadata', () => {
+        v.addEventListener('canplay', () => {
             v.play();
         })
     </script>
