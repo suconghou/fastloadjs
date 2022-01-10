@@ -1,51 +1,18 @@
 import { sleep } from './utils/util'
 import { httpResponse } from '../lib/types'
+import bufferCenter, { globalBuffer } from './utils/bufferCenter'
+
 export default class {
 
-    private stream: ReadableStream
-
+    private globalBuffer: bufferCenter = globalBuffer
     private dataMap: { [name: number]: httpResponse } = {}
     private dataMapArray: Array<httpResponse> = []
 
     private destroyed: boolean;
 
-    constructor(private init: ResponseInit) {
-        const _this = this;
-        const process = async (c: ReadableStreamDefaultController) => {
-            const { data, done, err } = await _this.get()
-            if (err) {
-                c.error(err)
-                return
-            }
-            if (data) {
-                c.enqueue(new Uint8Array(data))
-            }
-            if (done) {
-                c.close()
-            }
-        }
-        this.stream = new ReadableStream({
-            async start(c: ReadableStreamDefaultController) {
-                await process(c)
-            },
-            async pull(c: ReadableStreamDefaultController) {
-                await process(c)
-            }
-        })
-    }
+    // id = vid:itag
+    constructor(private id: string) {
 
-    private async get() {
-        while (true) {
-            if (this.destroyed) {
-                return { done: true, err: null, data: null }
-            }
-            const r = this.dataMapArray.shift()
-            if (!r) {
-                await sleep(100)
-                continue
-            }
-            return r
-        }
     }
 
     destroy() {
@@ -60,10 +27,6 @@ export default class {
     push(index: number, data: httpResponse) {
         this.dataMap[index] = data
         this.dataMapArray.push(data)
-    }
-
-    getResponse() {
-        return new Response(this.stream, this.init);
     }
 
 }

@@ -1,11 +1,11 @@
-import parser from '/Users/admin/data/git/youtubeproxy/mediaparse/src/index'
+import parser from '../mediaparse/index'
 
-import { taskItem, taskItemMap } from '../lib/types'
+import { taskItem, taskItemMap } from './types'
 
 // 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
 // m的开始值是 indexEndoffset+1, n的结束值是文件大小
-function webmTasks(info: any, indexEndoffset: number, len: number) {
-    const taskMap = {};
+function webmTasks(info: any, indexEndoffset: number, len: number): taskItemMap<taskItem> {
+    const taskMap: taskItemMap<taskItem> = {};
     const first = info[0];
     const segmentStart = indexEndoffset - first.cueClusterPosition + 1;
     const segmentEnd = len;
@@ -20,8 +20,8 @@ function webmTasks(info: any, indexEndoffset: number, len: number) {
         }
         const n = end
         taskMap[i] = {
-            m,
-            n,
+            start: m,
+            end: n,
             no: i,
             begin,
         }
@@ -30,8 +30,8 @@ function webmTasks(info: any, indexEndoffset: number, len: number) {
 }
 
 // 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
-function sidxTasks(info: any) {
-    const taskMap = {}
+function sidxTasks(info: any): taskItemMap<taskItem> {
+    const taskMap: taskItemMap<taskItem> = {}
     for (let i = 0; i < info.reference_count; i++) {
         const item = info.references[i]
         const no = i;
@@ -39,8 +39,8 @@ function sidxTasks(info: any) {
         const n = item.endRange
         const begin = item.startTimeSec;
         taskMap[no] = {
-            m,
-            n,
+            start: m,
+            end: n,
             no,
             begin
         }

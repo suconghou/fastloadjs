@@ -1,11 +1,11 @@
-import { fastConfig, httpResponse, dispatcher, taskItem, fetchTask } from "./types";
+import { fastConfig, httpResponse, taskItem, fetchTask } from "./types";
 import bufferController from './buffer'
-import dispatch from "./dispatch";
 import stream from "./stream";
 import workers from "./workers/index";
 import tasks from "./tasks/index";
+import dispatcher from './dispatcher'
 import { event, sleep } from './utils/util'
-import libwebrtc from '/Users/admin/data/git/repo/rtc/static/js/data'
+import libwebrtc from '../libwebrtc/index'
 
 const iceServers = {
 	"iceServers": [
@@ -36,13 +36,10 @@ export default class fastload extends event {
 	private defaultOpts = {
 		retry: 5,
 		thread: 2,
-		thunk: 524288,
 	}
 
-	private initial = false;
-
 	// 由外部注入,提供直接操作sourceBuffer的入口
-	public refBuffer: bufferController
+	private bufferCtrl: bufferController
 
 	private rtcLoop: number;
 
@@ -56,50 +53,27 @@ export default class fastload extends event {
 		super()
 		this.config = Object.assign({}, this.defaultOpts, opts)
 
-		if (!this.config.nop2p && !rtc && window.RTCPeerConnection) {
-			rtc = new libwebrtc(iceServers)
-			rtc.init()
+		if (this.config.p2p && !rtc && window.RTCPeerConnection) {
+			fastload.rtc()
 		}
 	}
 
 	// 此API仅调能用一次
-	public start(pause: boolean) {
-		const { thread, thunk, start, end, retry } = this.config
+	public init(bufferCtrl: bufferController): this {
+		// meta = vid:itag
+		const { meta, thread, retry } = this.config
 		if (!this.dispatcher) {
-			this.dispatcher = new dispatch(thunk, Number(start), Number(end))
+			throw new Error('must set dispatcher before start')
 		}
+		this.bufferCtrl = bufferCtrl
 
-		this.stream = new stream(null)
+		this.stream = new stream(meta)
 
 		this.worker = new workers(thread, retry, (res: httpResponse) => {
 			return this.taskDone(res)
 		}, () => {
 			this.taskFinish()
 		})
-		if (!pause) {
-			this.init()
-			this.initial = true
-		}
-		this.worker.pause = pause
-		return this;
-	}
-
-	public pause(pause: boolean) {
-		if (this.worker) {
-			this.worker.pause = pause
-		}
-		if (!pause && !this.initial) {
-			this.init()
-			this.initial = true
-		}
-	}
-
-	public setBufferHealth(t: number) {
-		this.bufferHealth = t;
-	}
-
-	private init() {
-		const { thread, } = this.config
 		let i = 0
 		while (i < thread) {
 			const items = this.dispatcher.next(10 + thread)
@@ -116,11 +90,26 @@ export default class fastload extends event {
 			}
 			i++;
 		}
-		if (!this.config.nop2p && window.RTCPeerConnection) {
-			if (!this.rtcLoop && this.config.meta != this.config.req) {
+		if (this.config.p2p && window.RTCPeerConnection) {
+			if (!this.rtcLoop) {
 				this.rtcLoop = setTimeout(() => this.rtcInit(), 1e3)
 			}
 		}
+		return this;
+	}
+
+	public pause(pause: boolean) {
+		if (this.worker) {
+			if (pause) {
+				this.worker.pause()
+			} else {
+				this.worker.start();
+			}
+		}
+	}
+
+	public setBufferHealth(t: number) {
+		this.bufferHealth = t;
 	}
 
 	public destroy() {
@@ -129,9 +118,9 @@ export default class fastload extends event {
 		this.stream.destroy();
 		this.stream = null
 		this.rtcReset()
-		if (this.refBuffer) {
-			this.refBuffer.q.clear()
-			this.refBuffer = null
+		if (this.bufferCtrl) {
+			this.bufferCtrl.q.clear()
+			this.bufferCtrl = null
 		}
 	}
 
@@ -162,42 +151,16 @@ export default class fastload extends event {
 				break
 			}
 			if (!cleared) {
-				this.refBuffer.q.clear()
+				this.bufferCtrl.q.clear()
 				cleared = true
 			}
-			this.refBuffer.repush(buffer.data)
+			this.bufferCtrl.repush(buffer.data)
 		}
 	}
 
-	// 处理mirrors负载策略
+	// 封装为闭包任务
 	private taskWrap(item: taskItem): fetchTask {
-		const { m, n, no } = item
-		let i = 0;
-		const used: Array<RequestInfo> = []
-		const urlFn = () => {
-			i++
-			const mirrors = [this.config.req].concat(this.config.mirrors)
-			// 首次使用取余算法,固定的分片序号被分配到固定的镜像上,首位镜像有较高权重
-			let u = mirrors[no % mirrors.length]
-			if (i <= 1) {
-				used.push(u)
-				return u
-			}
-			// 重试时排除之前使用的镜像然后在剩余镜像里随机
-			u = this.getBestURL(mirrors, used);
-			used.push(u)
-			return u
-		}
-		return tasks.wrap(this.config.retry, urlFn, m, n, no, this.stream)
-	}
-
-	// 这个是第二次及以后重试的,排除之前使用的,然后在剩余里随机,如果都使用过,则重新随机
-	private getBestURL(mirrors: RequestInfo[], used: RequestInfo[]): RequestInfo {
-		const m = mirrors.filter(item => !used.includes(item))
-		if (m.length) {
-			return m[Math.floor(Math.random() * m.length)]
-		}
-		return mirrors[Math.floor(Math.random() * mirrors.length)]
+		return tasks.wrap(item, this.config.meta, this.config.retry, this.config.req, this.config.mirrors)
 	}
 
 	// 一个任务完成了,收集这个任务结果,然后派发下个任务,如果任务出错,则终止
@@ -219,7 +182,7 @@ export default class fastload extends event {
 			this.trigger('res.done', res)
 		}
 		this.dispatcher.done(res.no);
-		if (!this.config.nop2p && window.RTCPeerConnection && this.config.meta != this.config.req) {
+		if (this.config.p2p && window.RTCPeerConnection) {
 			// 不是indexRange的请求才使用rtc;仅当已持有正确数据或当前未出错才回应
 			if ((a && !a.err) || (res.data && !res.err)) {
 				rtc.found(this.config.meta, res.no)
@@ -448,10 +411,6 @@ export default class fastload extends event {
 		if (rtc) {
 			rtc.clear()
 		}
-	}
-
-	getResponse(): Response {
-		return this.stream.getResponse();
 	}
 
 	static rtc() {

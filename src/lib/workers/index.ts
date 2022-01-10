@@ -5,16 +5,24 @@ export default class {
 
 	private t: number = 0
 	private tasks: Array<fetchTask> = []
-	public pause: boolean = false;
+	private paused: boolean = false;
 
 	constructor(private threadNum: number, private retry: number, private callback: Function, private finish: Function) {
 
 	}
 
+	pause() {
+		this.paused = true
+	}
+
+	start() {
+		this.paused = false
+	}
+
 	private async thread(threadId: number) {
 		let last = false
 		while (true) {
-			if (this.pause) {
+			if (this.paused) {
 				await sleep(100)
 				continue
 			}

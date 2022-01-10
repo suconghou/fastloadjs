@@ -1,7 +1,9 @@
-import { event, sleep, asyncQueue } from './lib/utils/util'
+import { sleep } from './lib/utils/util'
 import bufferController from './lib/buffer'
 import fastload from "./lib/fastload";
-import segments from './media/segments'
+import dispatcher from './lib/dispatcher'
+import { streamItem, taskItem } from './lib/types';
+import tasks from './lib/tasks';
 export default class extends fastload {
 
     private loaders: Array<fastload> = [];
@@ -10,23 +12,22 @@ export default class extends fastload {
 
     private video: HTMLMediaElement
 
-    private async get(req: string, start: number, end: number, mirrors: Array<string>) {
-        const config = {
-            req,
-            start: Number(start),
-            end: Number(end),
-            thread: 1,
-            thunk: 1024 ** 2,
-            meta: req,
-            mirrors,
-            nop2p: true
+    private async get(req: string, id: string, start: number, end: number, mirrors: Array<string>): Promise<ArrayBuffer> {
+        const item: taskItem = {
+            start,
+            end,
+            no: -end, // only for cache key in tasks.wrap
+            begin: 0, // not used in tasks.wrap
         }
-        const res = new fastload(config).start(false).getResponse()
-        return await res.arrayBuffer()
+        const res = await tasks.wrap(item, id, 10, req, mirrors)()
+        if (res.err) {
+            throw new res.err
+        }
+        return res.data
     }
 
 
-    async attach(video: HTMLMediaElement, streams: Array<any>) {
+    async attach(video: HTMLMediaElement, streams: Array<streamItem>) {
         const mediaSource = new MediaSource;
 
         const sourceOpen = async () => {
@@ -37,34 +38,31 @@ export default class extends fastload {
                 const tasks = [];
                 const finish = [];
                 for (let i = 0; i < streams.length; i++) {
-                    const { req, init, index, mimeCodec, len, duration, meta, mirrors } = streams[i]
-                    let mediaInfo = { index, len, duration };
-                    let webm = /\.webm/.test(req)
-                    const [initdata, indexdata] = await Promise.all([this.get(req, init.start, init.end + 1, mirrors), this.get(req, index.start, index.end + 1, mirrors)])
+                    const { req, init, index, mimeCodec, len, meta, mirrors } = streams[i]
+                    const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors), this.get(req, meta, index.start, index.end + 1, mirrors)])
                     initdatas.push([initdata, indexdata])
                     const config = {
                         req,
-                        start: 0,
-                        end: 0,
                         thread: this.config.thread,
+                        retry: this.config.retry,
                         meta,
                         mirrors,
-                        nop2p: this.config.nop2p
+                        p2p: this.config.p2p
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)
-                    f.dispatcher = new segments(indexdata, Number(index.end), Number(mediaInfo.len), webm)
+                    f.dispatcher = new dispatcher(indexdata, Number(index.end), Number(len), /\.webm/.test(req))
                     const segmentsMap = f.dispatcher.getMap()
                     dispatchs.push(segmentsMap)
-                    const reader = f.start(true).getResponse().body.getReader()
 
                     // 此前是异步,如果频繁切换,可能本实例已被destroy,检测一下
                     if (mediaSource.readyState !== 'open') {
                         return;
                     }
-                    const buffer = new bufferController(video, reader, mediaSource, mimeCodec)
+                    const buffer = new bufferController(video, mediaSource, mimeCodec)
+                    f.init(buffer)
+
                     // 添加一个实例的引用,用于控制cachefill
-                    f.refBuffer = buffer
                     tasks.push(() => {
                         f.pause(false)
                         buffer.push(initdata).push(indexdata)

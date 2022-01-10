@@ -8,7 +8,7 @@ export default class extends event {
 
     private done: boolean = false;
 
-    constructor(private video: HTMLMediaElement, reader: ReadableStreamDefaultReader, private mediaSource: MediaSource, mimeCodec: string) {
+    constructor(private video: HTMLMediaElement, private mediaSource: MediaSource, mimeCodec: string) {
         super()
         const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec)
         let doned = false;

@@ -1,20 +1,16 @@
 export interface fastConfig {
-	readonly thread?: number;
-	readonly thunk?: number;
-	readonly retry?: number;
-	readonly start: number;
-	readonly end: number
-	readonly req: RequestInfo;
-	readonly meta: string
+	readonly thread: number;
+	readonly retry: number;
+	readonly req: string;
+	readonly meta: string // vid:itag , for index :  vid:itag|index
 	readonly mirrors: Array<string>
-	readonly nop2p: boolean
+	readonly p2p: boolean
 }
 
 export interface httpResponse {
-	no: number,
+	readonly no: number,
 	data: ArrayBuffer,
 	err: any
-	done?: Boolean
 }
 
 export interface fetchOpts {
@@ -24,35 +20,49 @@ export interface fetchOpts {
 }
 
 export interface requestBuilder {
-	(req: RequestInfo, start: number, end: number): Request;
-}
-
-interface nextFunction extends Function {
-	(n: number): Array<taskItem>
+	(req: string, start: number, end: number): Request;
 }
 
 export interface fetchTask extends Function {
 	(): Promise<httpResponse>
 }
 
-export interface dispatcher {
-	total: number
-	next: nextFunction
-	getMap: Function
-	seekTo: Function
-	done: Function
-	isDone: Function
-}
 
 export interface taskItem {
-	m: number
-	n: number
-	no: number
-	begin: number
+	readonly start: number
+	readonly end: number
+	readonly no: number
+	readonly begin: number
+}
+
+export interface taskingItem extends taskItem {
 	done: Boolean
-	start: number
+	started: number
 	rstart: number
 }
+
 export interface taskItemMap<T> {
 	[key: number]: T;
+}
+
+
+export interface bufferItem {
+	readonly id: string
+	readonly part: number
+	readonly buffer: ArrayBuffer
+}
+
+export interface rangeItem {
+	start: number,
+	end: number,
+}
+
+export interface streamItem {
+	readonly req: string,
+	readonly init: rangeItem,
+	readonly index: rangeItem,
+	readonly mimeCodec: string,
+	readonly len: number,
+	readonly meta: string,
+	readonly mirrors: Array<string>
 }
