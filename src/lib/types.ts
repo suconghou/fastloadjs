@@ -1,21 +1,22 @@
 export interface fastConfig {
 	readonly thread: number;
+	readonly wsize: number
 	readonly retry: number;
 	readonly req: string;
-	readonly meta: string // vid:itag , for index :  vid:itag|index
+	readonly meta: string // vid:itag , for part :  vid:itag|part
 	readonly mirrors: Array<string>
 	readonly p2p: boolean
 }
 
-export interface httpResponse {
+export interface partResponse {
 	readonly no: number,
 	data: ArrayBuffer,
-	err: any
+	err: Error
 }
 
 export interface fetchOpts {
-	timeout: number
-	readtimeout: number
+	readonly timeout: number
+	readonly readtimeout: number
 	cache: boolean
 }
 
@@ -24,7 +25,7 @@ export interface requestBuilder {
 }
 
 export interface fetchTask extends Function {
-	(): Promise<httpResponse>
+	(): Promise<partResponse>
 }
 
 
@@ -35,13 +36,7 @@ export interface taskItem {
 	readonly begin: number
 }
 
-export interface taskingItem extends taskItem {
-	done: Boolean
-	started: number
-	rstart: number
-}
-
-export interface taskItemMap<T> {
+export interface objectMap<T> {
 	[key: number]: T;
 }
 
@@ -53,8 +48,8 @@ export interface bufferItem {
 }
 
 export interface rangeItem {
-	start: number,
-	end: number,
+	readonly start: number,
+	readonly end: number,
 }
 
 export interface streamItem {

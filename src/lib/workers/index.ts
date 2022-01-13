@@ -7,7 +7,7 @@ export default class {
 	private tasks: Array<fetchTask> = []
 	private paused: boolean = false;
 
-	constructor(private threadNum: number, private retry: number, private callback: Function, private finish: Function) {
+	constructor(private threadNum: number, private retry: number, private callback: Function) {
 
 	}
 
@@ -23,7 +23,7 @@ export default class {
 		let last = false
 		while (true) {
 			if (this.paused) {
-				await sleep(100)
+				await sleep(500)
 				continue
 			}
 			const task = this.get();
@@ -42,7 +42,7 @@ export default class {
 			}
 
 		}
-		this.taskDone();
+		this.t--
 	}
 
 	push(task: fetchTask) {
@@ -60,14 +60,6 @@ export default class {
 	private async taskOneDone(res: any) {
 		// console.info("one ok", res)
 		return await this.callback(res)
-	}
-
-	private taskDone() {
-		this.t--
-		if (this.t <= 0) {
-			// 如果中间出错终止,这个finish不会被调用.
-			this.finish()
-		}
 	}
 
 	private async do(task: fetchTask) {

@@ -10,7 +10,7 @@ export default class fetcher {
 		end: number,
 		opts: fetchOpts
 	): Promise<ArrayBuffer> {
-		// this.get 抛出的timeout是ttfb超时了,我们在parse里再设计个read的超时
+		// 此处抛出的timeout是ttfb超时了,我们在parse里再设计个read的超时
 		const res = await this.fetchInstance.fetch(req, start, end, opts);
 		return this.parse(res, opts);
 	}

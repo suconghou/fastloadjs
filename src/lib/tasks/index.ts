@@ -1,7 +1,7 @@
 
 import fetcher from '../fetcher/index'
 import { sleep, } from '../../lib/utils/util'
-import { httpResponse, fetchOpts, fetchTask, taskItem } from '../types'
+import { partResponse, fetchOpts, fetchTask, taskItem } from '../types'
 import { globalBuffer } from '../utils/bufferCenter';
 
 export default class {
@@ -30,16 +30,16 @@ export default class {
 
 	// 再此处理重试逻辑, 此处校验数据, 此处的end值,实际在range时,需要-1
 	private static retry(retry: number, urlFn: (() => string), id: string, start: number, end: number, no: number): fetchTask {
-		return async (): Promise<httpResponse> => {
-			const res: httpResponse = { no: no, data: null, err: null };
+		return async (): Promise<partResponse> => {
+			const res: partResponse = { no: no, data: null, err: null };
 			const buf = globalBuffer.get(id, no)
-			if (buf) {
+			if (buf && buf.buffer) {
 				res.data = buf.buffer
 				return res
 			}
 			let url: string;
 			const size = end - start;
-			let opts: fetchOpts = {
+			const opts: fetchOpts = {
 				timeout: 15e3,
 				readtimeout: 30e3,
 				cache: true,
@@ -59,7 +59,7 @@ export default class {
 				} catch (e) {
 					// 如果这次下载失败,但是我们检查结果,可能rtc已经成功了,放弃本次http任务
 					const buf = globalBuffer.get(id, no)
-					if (buf) {
+					if (buf && buf.buffer) {
 						console.info("http error but rtc ok", start, end, no)
 						res.err = null;
 						res.data = buf.buffer;
@@ -69,7 +69,6 @@ export default class {
 					console.error(e, i, url, start, end, no)
 					res.err = e;
 					await sleep(2e3)
-					opts.timeout += 5e3;
 				}
 			}
 			return res;

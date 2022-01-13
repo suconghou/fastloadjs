@@ -12,6 +12,8 @@ export default class {
 
     private restart: number = 0
 
+    private activetime: number = 0
+
     constructor(public readonly id: string, private readonly servers: RTCConfiguration, private readonly onmsg: (type: string, e: Object) => void) {
         this.init();
     }
@@ -49,6 +51,7 @@ export default class {
             }
             this.dc = ev.channel
             this.dc.binaryType = 'arraybuffer'
+            this.dc.bufferedAmountLowThreshold = 65536
             this.dcInit()
             log(ev)
         }
@@ -99,6 +102,7 @@ export default class {
             }
             this.dc = this.c.createDataChannel("dc", { maxPacketLifeTime: 2000 })
             this.dc.binaryType = 'arraybuffer'
+            this.dc.bufferedAmountLowThreshold = 65536;
             this.dcInit()
         }
         if (this.c && this.c.connectionState == 'connected' && this.dc && this.dc.readyState == 'open') {
@@ -118,6 +122,7 @@ export default class {
             this.dc.close()
         })
         this.dc.onopen = (e) => {
+            this.activetime = Date.now()
             warn("dc open me : " + uuid() + " remote: " + this.id, e)
             this.onmsg('open', e);
         }
@@ -129,10 +134,9 @@ export default class {
             warn("dc error " + this.id, e)
             this.onmsg('error', e);
         }
-        this.dc.addEventListener('closing', (e) => {
-            warn("dc closing " + this.id, e)
-            this.onmsg('closing', e);
-        })
+        this.dc.onbufferedamountlow = () => {
+            // 如果我们有发送任务，在此处发送
+        }
         this.dc.onmessage = async (e) => {
             clearTimeout(this.restart)
             let data = e.data;
@@ -187,6 +191,7 @@ export default class {
         log("made connection ", this.id)
     }
 
+    // TODO improve this
     send(data: any) {
         if (!this.dc) {
             log("data channel to " + this.id + " is not avaiable")
@@ -220,6 +225,7 @@ export default class {
             cstate: this.c ? this.c.connectionState : '',
             istate: this.c ? this.c.iceConnectionState : '',
             gstate: this.c ? this.c.iceGatheringState : '',
+            activetime: this.activetime,
         }
     }
 }

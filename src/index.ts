@@ -3,7 +3,7 @@ import bufferController from './lib/buffer'
 import fastload from "./lib/fastload";
 import dispatcher from './lib/dispatcher'
 import { streamItem, taskItem } from './lib/types';
-import tasks from './lib/tasks';
+import tasks from './lib/tasks/index';
 export default class extends fastload {
 
     private loaders: Array<fastload> = [];
@@ -21,7 +21,7 @@ export default class extends fastload {
         }
         const res = await tasks.wrap(item, id, 10, req, mirrors)()
         if (res.err) {
-            throw new res.err
+            throw res.err
         }
         return res.data
     }
@@ -32,22 +32,19 @@ export default class extends fastload {
 
         const sourceOpen = async () => {
             try {
-                // console.info('source open')
                 const dispatchs = [];
-                const initdatas = [];
                 const tasks = [];
-                const finish = [];
                 for (let i = 0; i < streams.length; i++) {
                     const { req, init, index, mimeCodec, len, meta, mirrors } = streams[i]
                     const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors), this.get(req, meta, index.start, index.end + 1, mirrors)])
-                    initdatas.push([initdata, indexdata])
                     const config = {
                         req,
                         thread: this.config.thread,
                         retry: this.config.retry,
                         meta,
                         mirrors,
-                        p2p: this.config.p2p
+                        p2p: this.config.p2p,
+                        wsize: this.config.wsize,
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)
@@ -67,27 +64,16 @@ export default class extends fastload {
                         f.pause(false)
                         buffer.push(initdata).push(indexdata)
                     })
-                    finish.push(buffer.wait())
                     buffer.listen('error', (err) => {
                         // 此处终止,上层需显示错误页面
                         this.trigger('error', err)
                         this.pause()
                     })
-                    buffer.listen('pause', () => {
-                        // buffer is full
-                        f.pause(true)
-                    })
-                    buffer.listen('start', () => {
-                        f.pause(false)
-                    })
                 }
-                this.trigger('ready', this.loaders, dispatchs, initdatas)
+                this.trigger('ready', this.loaders, dispatchs)
                 for (let f of tasks) {
                     f();
                 }
-                await Promise.all(finish)
-                // 再有cachefill来回seek的情况下,此时不能endOfStream
-                // console.info("endOfStream")
             } catch (e) {
                 this.trigger('error', e)
                 this.pause()

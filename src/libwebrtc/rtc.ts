@@ -8,7 +8,7 @@ export default class extends event {
 	private m: manager
 	public id: string
 	private buffers: Map<string, Array<ArrayBuffer>> = new Map()
-	constructor(private readonly servers: RTCConfiguration) {
+	constructor(servers: RTCConfiguration) {
 		super()
 		this.m = new manager(servers)
 		this.m.listen("message", (e) => {
@@ -27,7 +27,7 @@ export default class extends event {
 	private extract(data: ArrayBuffer, uid: string) {
 		try {
 			const headerLen = 30
-			let meta = ab2str(data.slice(0, headerLen)).trim()
+			const meta = ab2str(data.slice(0, headerLen)).trim()
 			info(meta)
 			if (!/^[!-~]+$/.test(meta)) {
 				// 不是我们的分片数据直接交由其他程序处理
@@ -119,23 +119,12 @@ export default class extends event {
 		return this.m.getStats()
 	}
 
-	async sendBuffer(uuid: string, data: ArrayBuffer, id: string, cancel: Function) {
+	sendBuffer(uuid: string, data: ArrayBuffer, id: string) {
 		const datas = this.splitBuffer(data, id)
 		for (let i = 0; i < datas.length; i++) {
 			const item = datas[i]
-			if (cancel(i, item)) {
-				return
-			}
 			this.sendTo(uuid, item.data)
-			await sleep(500)
 		}
-	}
-
-	broadcastBuffer(data: ArrayBuffer, id: string) {
-		const datas = this.splitBuffer(data, id)
-		datas.forEach(item => {
-			this.broadcast(item.data)
-		})
 	}
 
 	private splitBuffer(data: ArrayBuffer, id: string) {

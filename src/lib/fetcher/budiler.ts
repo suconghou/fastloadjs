@@ -1,7 +1,7 @@
 import { requestBuilder } from "../types";
 
 export const urlbuilder: requestBuilder = (
-    req: RequestInfo,
+    req: string,
     start: number,
     end: number): Request => {
     const init = {

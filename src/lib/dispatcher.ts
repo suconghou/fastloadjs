@@ -1,11 +1,11 @@
 import parser from '../mediaparse/index'
 
-import { taskItem, taskItemMap } from './types'
+import { taskItem, objectMap } from './types'
 
 // 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
 // m的开始值是 indexEndoffset+1, n的结束值是文件大小
-function webmTasks(info: any, indexEndoffset: number, len: number): taskItemMap<taskItem> {
-    const taskMap: taskItemMap<taskItem> = {};
+function webmTasks(info: any, indexEndoffset: number, len: number): objectMap<taskItem> {
+    const taskMap: objectMap<taskItem> = {};
     const first = info[0];
     const segmentStart = indexEndoffset - first.cueClusterPosition + 1;
     const segmentEnd = len;
@@ -30,8 +30,8 @@ function webmTasks(info: any, indexEndoffset: number, len: number): taskItemMap<
 }
 
 // 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
-function sidxTasks(info: any): taskItemMap<taskItem> {
-    const taskMap: taskItemMap<taskItem> = {}
+function sidxTasks(info: any): objectMap<taskItem> {
+    const taskMap: objectMap<taskItem> = {}
     for (let i = 0; i < info.reference_count; i++) {
         const item = info.references[i]
         const no = i;
@@ -49,13 +49,12 @@ function sidxTasks(info: any): taskItemMap<taskItem> {
 }
 
 
-export default class segments {
+export default class {
 
-    private taskMap: taskItemMap<taskItem> = {}
+    private taskMap: objectMap<taskItem> = {}
     private index: number = 0
     public readonly total: number = 0
-
-    constructor(buffer: ArrayBuffer, indexEndoffset: number, totalLen: any, webm: boolean) {
+    constructor(buffer: ArrayBuffer, indexEndoffset: number, totalLen: number, webm: boolean) {
         const s = new parser(new DataView(buffer), !webm)
         const info = s.parse(indexEndoffset);
         if (webm) {
@@ -66,53 +65,36 @@ export default class segments {
         this.total = Object.keys(this.taskMap).length
     }
 
-    next(n: number = 10): Array<taskItem> {
+    // 供 http 和 rtc 任务抢占,下次调用，从连续buffer断开处开始
+    next(n: number = 10, check: (no: number) => boolean): Array<taskItem> {
         const resList: Array<taskItem> = [];
         const max = Math.min(this.index + n, this.total);
-        let constant = true;
+        let continuity = true;
         let nextIndex = this.index;
         for (let i = this.index; i < max; i++) {
             const item = this.taskMap[i];
-            if (item.done) {
-                if (constant) {
+            if (check(item.no)) {
+                if (continuity) {
                     nextIndex = item.no + 1;
                 }
                 continue;
             }
-            constant = false;
+            continuity = false;
             resList.push(item);
         }
         this.index = nextIndex;
         return resList;
     }
 
-    isDone(): boolean {
-        for (let i = 0; i < this.total; i++) {
-            const item = this.taskMap[i]
-            if (!item.done) {
-                return false;
-            }
-        }
-        return true
-    }
-
-    getMap(): taskItemMap<taskItem> {
+    getMap(): objectMap<taskItem> {
         return this.taskMap;
     }
 
     seekTo(n: number) {
         if (n >= this.total) {
-            throw new Error("index error")
+            throw new Error("seek error")
         }
         this.index = n;
-    }
-
-    done(no: number) {
-        if (this.taskMap[no]) {
-            this.taskMap[no].done = true
-        } else {
-            console.error("error in done");
-        }
     }
 
 }
