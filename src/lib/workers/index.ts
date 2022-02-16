@@ -5,7 +5,7 @@ export default class {
 
 	private t: number = 0
 	private tasks: Array<fetchTask> = []
-	private paused: boolean = false;
+	private paused: boolean = true;
 
 	constructor(private threadNum: number, private retry: number, private callback: Function) {
 

@@ -37,6 +37,7 @@ export default class fastload extends event {
 		retry: 5,
 		thread: 2,
 		wsize: 12,
+		p2p: false,
 	}
 
 	// 由外部注入,提供直接操作sourceBuffer的入口
@@ -73,7 +74,7 @@ export default class fastload extends event {
 		this.bufferCtrl = bufferCtrl
 		bufferCtrl.listen('pause', () => {
 			// buffer is full
-			this.pause(true)
+			this.pause()
 			this.bufferInuse.clear()
 		})
 		this.worker = new workers(thread, retry, (res: partResponse) => this.taskDone(res))
@@ -101,14 +102,12 @@ export default class fastload extends event {
 		return true
 	}
 
-	public pause(pause: boolean) {
-		if (this.worker) {
-			if (pause) {
-				this.worker.pause()
-			} else {
-				this.worker.start();
-			}
-		}
+	public start() {
+		this.worker && this.worker.start()
+	}
+
+	public pause() {
+		this.worker && this.worker.pause()
 	}
 
 	public setBufferHealth(t: number) {
@@ -117,7 +116,7 @@ export default class fastload extends event {
 
 	public destroy() {
 		this.remove('')
-		this.pause(true)
+		this.pause()
 		this.rtcReset()
 		if (this.bufferCtrl) {
 			this.bufferCtrl.destroy()
@@ -127,7 +126,7 @@ export default class fastload extends event {
 
 	// 此处需要根据时间,判断出所在的segment
 	public seekTo(time: number) {
-		this.pause(false);
+		this.start();
 		const segmentsMap = this.dispatcher.getMap();
 		const len = this.dispatcher.total;
 		for (let i = 0; i < len; i++) {
@@ -198,7 +197,7 @@ export default class fastload extends event {
 		if (this.rtcFound && this.bufferHealth > 15) {
 			await sleep(1e3 * (this.bufferHealth / 30)) // 每30秒buffer换取1秒延时
 		}
-		const items: Array<taskItem> = this.dispatcher.next(this.config.wsize + this.config.thread, this.check)
+		const items: Array<taskItem> = this.dispatcher.next(this.config.wsize + this.config.thread, this.check.bind(this))
 		if (!items.length) {
 			// 全部buffer都已存在，只能表明当前window下,没有需要发起请求的了,我们空轮询
 			this.worker.push(async (): Promise<partResponse> => {
@@ -320,7 +319,7 @@ export default class fastload extends event {
 			return arr
 		}
 		const task = () => {
-			const items: Array<taskItem> = this.dispatcher.next(this.config.wsize + this.config.thread, this.check)
+			const items: Array<taskItem> = this.dispatcher.next(this.config.wsize + this.config.thread, this.check.bind(this))
 			const stat = rtc.getStats()
 			this.trigger('rtc.stat', stat, rtc.id)
 			if (!items.length) {

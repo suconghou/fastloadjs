@@ -16,16 +16,16 @@ export default class extends fastload {
         const item: taskItem = {
             start,
             end,
-            no: -end, // only for cache key in tasks.wrap
+            no: 1e9 * (mirrors.length + 1), // only for cache key in tasks.wrap
             begin: 0, // not used in tasks.wrap
         }
-        const res = await tasks.wrap(item, id, 10, req, mirrors)()
+        const retry = 10
+        const res = await tasks.wrap(item, id, retry, req, mirrors)()
         if (res.err) {
             throw res.err
         }
         return res.data
     }
-
 
     async attach(video: HTMLMediaElement, streams: Array<streamItem>) {
         const mediaSource = new MediaSource;
@@ -36,13 +36,13 @@ export default class extends fastload {
                 const tasks = [];
                 for (let i = 0; i < streams.length; i++) {
                     const { req, init, index, mimeCodec, len, meta, mirrors } = streams[i]
-                    const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors), this.get(req, meta, index.start, index.end + 1, mirrors)])
+                    const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors || []), this.get(req, meta, index.start, index.end + 1, mirrors || [])])
                     const config = {
                         req,
                         thread: this.config.thread,
                         retry: this.config.retry,
                         meta,
-                        mirrors,
+                        mirrors: mirrors || [],
                         p2p: this.config.p2p,
                         wsize: this.config.wsize,
                     }
@@ -61,7 +61,7 @@ export default class extends fastload {
 
                     // 添加一个实例的引用,用于控制cachefill
                     tasks.push(() => {
-                        f.pause(false)
+                        f.start()
                         buffer.push(initdata).push(indexdata)
                     })
                     buffer.listen('error', (err) => {
@@ -93,6 +93,7 @@ export default class extends fastload {
         video.src = URL.createObjectURL(mediaSource);
         this.timeUpdate = this.timeUpdate.bind(this)
         video.addEventListener('timeupdate', this.timeUpdate)
+        video.addEventListener('progress', this.timeUpdate)
     }
 
     private timeUpdate() {
@@ -102,9 +103,9 @@ export default class extends fastload {
                 const start = this.video.buffered.start(i)
                 const end = this.video.buffered.end(i)
                 if (cur >= start && cur <= end) {
-                    // 找到当前播放点所在的缓存端,缓存区不足600秒时,需要开启worker下载数据
+                    // 找到当前播放点所在的缓存端,缓存区不足300秒时,需要开启worker下载数据
                     const cached = end - cur
-                    if (cached > 600) {
+                    if (cached > 3) {
                         this.pause()
                     } else {
                         this.start()
@@ -117,12 +118,12 @@ export default class extends fastload {
     }
 
     public start() {
-        this.loaders.forEach(item => item.pause(false))
+        this.loaders.forEach(item => item.start())
         return this
     }
 
     public pause() {
-        this.loaders.forEach(item => item.pause(true))
+        this.loaders.forEach(item => item.pause())
         return this;
     }
 
@@ -133,6 +134,7 @@ export default class extends fastload {
 
     public async destroy() {
         this.video.removeEventListener('timeupdate', this.timeUpdate)
+        this.video.removeEventListener('progress', this.timeUpdate)
         window.URL.revokeObjectURL(this.video.src);
         this.loaders.forEach(item => item.destroy())
         this.loaders = []

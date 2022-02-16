@@ -19,3 +19,13 @@ libwebrtc 修改 `ws server`
 `make build` 完成编译
 
 
+进一步优化P2P
+
+批量查询、回复
+
+滑动窗口算法
+
+自己记录回应过的peer
+
+废弃中途取消
+
