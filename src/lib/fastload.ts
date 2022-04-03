@@ -3,7 +3,8 @@ import bufferController from './buffer'
 import workers from "./workers/index";
 import tasks from "./tasks/index";
 import dispatcher from './dispatcher'
-import { event, sleep } from './utils/util'
+import { sleep } from './utils/util'
+import event from "./utils/event";
 import libwebrtc from '../libwebrtc/index'
 import { globalBuffer } from "./utils/bufferCenter";
 

@@ -1,3 +1,4 @@
+import { rtcRecv } from '../../lib/types';
 import wsocket from './ws'
 const baseURL = localStorage.getItem('ws') || 'wss://ws.feds.club/uid/'
 let uid = '';
@@ -83,3 +84,48 @@ export const padRight = (str: string, max: number): string => {
     }
     return str;
 }
+
+
+// 协议打包，解包
+// 协议头|版本号|头部长度
+
+// 二进制协议
+// protocol 16位 0x7363
+// 8位
+const protocol = [0x73, 0x64];
+const version = 0xa1
+// 长度8位
+export const decode = (data: ArrayBuffer): rtcRecv => {
+    const x = new Uint8Array(data)
+    if (x.length < 4) {
+        throw new Error("bad msg");
+    }
+    if (!(x[0] === protocol[0] && x[1] === protocol[1])) {
+        throw new Error("mismatch protocol")
+    }
+    if (x[2] !== version) {
+        throw new Error("mismatch version")
+    }
+    const l = x[3]
+    const meta = x.slice(4, 4 + l)
+    const body = data.slice(4 + l)
+    const metaStr = String.fromCharCode.apply(null, meta);
+    const [id, sn, i, n] = JSON.parse(metaStr)
+    const ret: rtcRecv = {
+        id,
+        sn,
+        i,
+        n,
+        data: body
+    }
+    return ret
+}
+
+
+export const encode = (data: ArrayBuffer, id: string, sn: number, i: number, n: number): ArrayBuffer => {
+    const str = JSON.stringify([id, sn, i, n]);
+    const x = new Uint8Array([protocol[0], protocol[1], version, str.length]);
+    const header = concatArrayBuffers(x.buffer, str2ab(str))
+    return concatArrayBuffers(header, data);
+}
+

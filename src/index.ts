@@ -16,7 +16,7 @@ export default class extends fastload {
         const item: taskItem = {
             start,
             end,
-            no: 1e9 * (mirrors.length + 1), // only for cache key in tasks.wrap
+            no: 1e9 * (mirrors.length + 1), // only for cache key in tasks.wrap, 此数值使取余算法得到第0位置
             begin: 0, // not used in tasks.wrap
         }
         const retry = 10

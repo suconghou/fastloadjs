@@ -61,3 +61,11 @@ export interface streamItem {
 	readonly meta: string,
 	readonly mirrors: Array<string>
 }
+
+export interface rtcRecv {
+	id: string, // videoId
+	sn: number,
+	i: number, // 当前传输块序号
+	n: number, // 共计多少块
+	data: ArrayBuffer
+}

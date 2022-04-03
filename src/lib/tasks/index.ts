@@ -68,7 +68,7 @@ export default class {
 					opts.cache = false
 					console.error(e, i, url, start, end, no)
 					res.err = e;
-					await sleep(2e3)
+					await sleep(200)
 				}
 			}
 			return res;

@@ -1,5 +1,5 @@
-import { event, sleep, asyncQueue } from './utils/util'
-
+import { sleep, asyncQueue } from './utils/util'
+import event from './utils/event';
 // 共计抛出事件  pause / error
 // error 被顶级处理， pause 被所属fastloader处理
 export default class extends event {
@@ -13,12 +13,8 @@ export default class extends event {
     constructor(private video: HTMLMediaElement, private mediaSource: MediaSource, mimeCodec: string) {
         super()
         const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec)
-        sourceBuffer.addEventListener('abort', (e) => {
-            console.info(e)
-        })
-        sourceBuffer.addEventListener('error', (e) => {
-            console.error(e)
-        })
+        sourceBuffer.addEventListener('abort', console.info)
+        sourceBuffer.addEventListener('error', console.error)
         this.sourceBuffer = sourceBuffer;
     }
 

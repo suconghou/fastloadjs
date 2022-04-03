@@ -1,20 +1,24 @@
-import { ws, uuid, warn, info, log } from './util/util'
+import { bufferItem, rtcRecv } from '../lib/types';
+import { globalBuffer } from '../lib/utils/bufferCenter';
+import { ws, uuid, warn, info, log, decode, concatArrayBuffers } from './util/util'
 
 export default class {
 
     private c: RTCPeerConnection
-
     private dc: RTCDataChannel;
-
     private tx: number = 0
-
     private rx: number = 0
-
     private restart: number = 0
-
     private activetime: number = 0
+    private isServer: boolean
 
-    constructor(public readonly id: string, private readonly servers: RTCConfiguration, private readonly onmsg: (type: string, e: Object) => void) {
+
+    // 缓存分包的rtc数据，收到完整的一个包后清理缓存
+    private buffers: Map<string, Array<ArrayBuffer>> = new Map()
+
+
+    // trigger open/close/error/message
+    constructor(public readonly id: string, private readonly servers: RTCConfiguration, private readonly trigger: (type: string, data: Object) => void) {
         this.init();
     }
 
@@ -124,15 +128,15 @@ export default class {
         this.dc.onopen = (e) => {
             this.activetime = Date.now()
             warn("dc open me : " + uuid() + " remote: " + this.id, e)
-            this.onmsg('open', e);
+            this.trigger('open', { id: this.id, data: e });
         }
         this.dc.onclose = e => {
             warn("dc close " + this.id, e)
-            this.onmsg('close', e);
+            this.trigger('close', { id: this.id, data: e });
         }
         this.dc.onerror = e => {
             warn("dc error " + this.id, e)
-            this.onmsg('error', e);
+            this.trigger('error', { id: this.id, data: e });
         }
         this.dc.onbufferedamountlow = () => {
             // 如果我们有发送任务，在此处发送
@@ -149,7 +153,57 @@ export default class {
             } else {
                 this.rx += data.length
             }
-            this.onmsg('message', { data })
+            this.activetime = Date.now()
+            this.extract(data)
+        }
+    }
+
+    // TODO trigger message/buffer/buffer.recv
+    private extract(data: ArrayBuffer) {
+        if (!(data instanceof ArrayBuffer)) {
+            return this.trigger('message', { data, id: this.id })
+        }
+        const info: rtcRecv = decode(data)
+        const item = this.buffers.get(info.id)
+        if (item) {
+            item[info.i] = info.data
+        } else {
+            const b: Array<ArrayBuffer> = [];
+            b[info.i] = info.data
+            this.buffers.set(info.id, b)
+        }
+        // 分片传输中,可用于进度提示
+        this.trigger('buffer.recv', { data: info, id: this.id })
+        let done = true;
+        const c = this.buffers.get(info.id)
+        for (let j = 0; j < info.n; j++) {
+            if (!c[j]) {
+                done = false
+                break
+            }
+        }
+        if (!done) {
+            return
+        }
+        // 全部分片已持有,合并所有分片
+        let buffers: ArrayBuffer = c[0]
+        for (let j = 1; j < info.n; j++) {
+            buffers = concatArrayBuffers(buffers, c[j])
+        }
+        this.buffers.delete(info.id)
+        let partItem: bufferItem = globalBuffer.get(info.id, info.sn)
+        const newly = !partItem
+        if (!partItem) {
+            partItem = {
+                id: info.id,
+                part: info.sn,
+                buffer: buffers
+            }
+            globalBuffer.put(partItem)
+        }
+        this.trigger('buffer', { data: partItem, newly, id: this.id })
+        if (!newly) {
+            console.info('already have buffer', partItem)
         }
     }
 
