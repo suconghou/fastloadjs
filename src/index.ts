@@ -43,13 +43,14 @@ export default class extends fastload {
                         retry: this.config.retry,
                         meta,
                         mirrors: mirrors || [],
-                        p2p: this.config.p2p,
                         wsize: this.config.wsize,
+                        tracker: this.config.tracker,
+                        rtcConf: this.config.rtcConf,
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)
-                    f.dispatcher = new dispatcher(indexdata, Number(index.end), Number(len), /\.webm/.test(req))
-                    const segmentsMap = f.dispatcher.getMap()
+                    const disp = new dispatcher(indexdata, Number(index.end), Number(len), /\.webm/.test(req))
+                    const segmentsMap = disp.getMap()
                     dispatchs.push(segmentsMap)
 
                     // 此前是异步,如果频繁切换,可能本实例已被destroy,检测一下
@@ -57,7 +58,7 @@ export default class extends fastload {
                         return;
                     }
                     const buffer = new bufferController(video, mediaSource, mimeCodec)
-                    f.init(buffer)
+                    f.init(buffer, disp)
 
                     // 添加一个实例的引用,用于控制cachefill
                     tasks.push(() => {

@@ -29,3 +29,17 @@ libwebrtc 修改 `ws server`
 
 废弃中途取消
 
+
+
+const iceServers = {
+	"iceServers": [
+		{
+			urls: "stun:119.29.1.39:3478",
+		},
+		{
+			urls: "turn:119.29.1.39:3478",
+			username: "su",
+			credential: "su"
+		},
+	]
+};

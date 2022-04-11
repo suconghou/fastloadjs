@@ -1,27 +1,26 @@
 import { rtcRecv } from '../../lib/types';
 import wsocket from './ws'
-const baseURL = localStorage.getItem('ws') || 'wss://ws.feds.club/uid/'
 let uid = '';
-export const ws = (ev?: any) => {
-    let event = '';
-    if (!ev) {
-        // ev 传入空字符串清空订阅, 传入false或不传不修改订阅
-        event = ev;
-    } else {
-        event = `rtc:${ev}`;
+let $ws: wsocket;
+export const singal = (addr: string): wsocket => {
+    if (!$ws) {
+        $ws = new wsocket(addr + uuid())
+        $ws.listen('message', (ev: MessageEvent) => {
+            try {
+                if (typeof ev.data == 'string') {
+                    const data = JSON.parse(ev.data)
+                    if (!data.event) {
+                        return console.warn(data)
+                    }
+                    return $ws.trigger(data.event, data)
+                }
+                return console.warn(ev.data)
+            } catch (e) {
+                console.error(e)
+            }
+        })
     }
-    const url = baseURL + uuid();
-    return wsocket.getWs(
-        url,
-        (event: any) => {
-            const data = JSON.parse(event.data)
-            return {
-                ev: `${data.event}`,
-                data: data
-            };
-        },
-        event
-    );
+    return $ws
 }
 
 export const uuid = () => {
@@ -39,19 +38,6 @@ export const uuid = () => {
     return uid
 }
 
-
-export const sleep = async (ms: number) => {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms);
-    });
-};
-
-
-const logevel = sessionStorage.getItem('loglevel')
-
-export const warn = ['warn', 'info', 'log'].includes(logevel) ? console.warn.bind(console) : () => { }
-export const info = ['info', 'log'].includes(logevel) ? console.info.bind(console) : () => { }
-export const log = ['log'].includes(logevel) ? console.log.bind(console) : () => { }
 
 export const concatArrayBuffers = (buffer1: ArrayBuffer, buffer2: ArrayBuffer): ArrayBuffer => {
     if (!buffer1) {
@@ -129,3 +115,7 @@ export const encode = (data: ArrayBuffer, id: string, sn: number, i: number, n: 
     return concatArrayBuffers(header, data);
 }
 
+
+export const isServer = (uuid: string) => {
+    return uuid.startsWith('SS') && uuid.endsWith('SS')
+}

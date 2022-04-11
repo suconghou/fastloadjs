@@ -1,25 +1,62 @@
-import { ws, uuid, concatArrayBuffers, str2ab, ab2str, padRight, sleep, info, encode } from './util/util'
+import { singal, uuid } from './util/util'
 import event from './util/event'
 import peer from './peer'
-import { bufferItem } from '../lib/types'
+import { fastConfig, objectStrMap, peerStat } from '../lib/types'
+import ws from './util/ws'
+import { eqSet } from '../lib/utils/util'
 
 const streams = new Map<string, peer>()
 
-const rtcMax = 64 * 1024
-
 
 export default class extends event {
-	public id: string
+
+	// 记录与我们播放和持有的相关资源
+	private hostIds: Set<string> = new Set()
+
+	// 当前ws链接已经持有的IDS
+	private wsIds: Set<string> = new Set()
+
+	private me: string = uuid()
+	private $ws: ws;
 	// will trigger open/close/error/message
 	// message 事件拆解 message.buffer buffer
-	constructor(private servers: RTCConfiguration) {
+	constructor(private readonly opts: fastConfig) {
 		super()
-		this.id = uuid()
+		this.$ws = singal(opts.tracker);
+		this.init();
 	}
 
 
-	init() {
-		ws()
+	// TODO 根据对端图解，猜测要向哪个peer获取，可以分解任务，并发向多个peer索取
+	// 1. 先判断对端是否在线
+	// 2. 优先查找非server类型，且持有当前parts中部分的
+	// 3. 直到当前parts中消耗完毕，若仍有则向server peer发起请求
+	// 4. 如果没有server peer,则猜测一个最佳peer发送请求
+	// 5. 发送请求后每隔一段时间，检测是否有回复，若没有回复，则换一个peer发送
+	// 6. 需要记住哪些刚刚发送过请求，当上层重试时，重试其他的peer
+	req(id: string, parts: Array<any>) {
+		this.join(id);
+		const s = this.getStats();
+		for (const [uid, peerItem] of Object.entries(s)) {
+			if (peerItem.state !== 'open') {
+				continue
+			}
+			if (peerItem.isServer) {
+				// TODO add servers
+				continue
+			}
+			const hosts = peerItem.hosts[id]
+			if (!hosts) {
+				// 这个client peer 完全没有当前资源的信息
+				continue
+			}
+			// TODO 检查哪些对方持有，我们去索要
+			const data = JSON.stringify({ event: 'resolve', data: { id, parts: [1, 2, 3, 4, 5, 6] } })
+		}
+	}
+
+	private init() {
+		this.$ws
 			.listen('offer', (data: any) => {
 				this.onOffer(data.from, data.data)
 			})
@@ -30,7 +67,7 @@ export default class extends event {
 				this.onCandidate(data.from, data.data)
 			})
 			.listen('online', (data: any) => {
-				if (data.id != this.id) {
+				if (data.id != this.me) {
 					this.toConnect(data.id)
 				}
 			})
@@ -39,72 +76,29 @@ export default class extends event {
 			})
 	}
 
-	// 向外暴露API
-
-	// 单个发送
-	sendTo(uuid: string, data: any) {
-		const s = streams.get(uuid)
-		if (!s) {
-			return console.error("uuid " + uuid + " not connected")
+	// 如果没有发送过join,则发送join swarm消息
+	private join(id: string) {
+		this.hostIds.add(id)
+		if (!eqSet(this.hostIds, this.wsIds)) {
+			this.$ws.sendJson({ event: 'join', ids: [...this.hostIds] })
+			this.wsIds = new Set(this.hostIds)
 		}
-		return s.send(data)
-	}
-
-	// 广播
-	broadcast(data: any) {
-		streams.forEach(item => {
-			item.send(data)
-		})
 	}
 
 	getPeers() {
 		return streams.keys()
 	}
 
-	getStats() {
-		const stat = {};
+	getStats(): objectStrMap<peerStat> {
+		const stat: objectStrMap<peerStat> = {};
 		streams.forEach(item => {
 			stat[item.id] = item.stat()
 		})
 		return stat;
 	}
 
-	sendBuffer(uuid: string, data: bufferItem) {
-		const s = streams.get(uuid)
-		if (!s) {
-			return console.error("uuid " + uuid + " not connected")
-		}
-		const datas = this.splitBuffer(data)
-		for (let i = 0; i < datas.length; i++) {
-			const item = datas[i]
-			s.send(item)
-		}
-	}
-
-	private splitBuffer(data: bufferItem): Array<ArrayBuffer> {
-		let i = 0;
-		let last = false;
-		const l = data.buffer.byteLength
-		const datas: Array<ArrayBuffer> = [];
-		const n = Math.ceil(l / rtcMax)
-		while (true) {
-			const start = rtcMax * i;
-			let end = rtcMax * (i + 1)
-			if (end >= l) {
-				end = l
-				last = true
-			}
-			const v = data.buffer.slice(start, end)
-			datas.push(encode(v, data.id, data.part, i, n))
-			i++
-			if (last) {
-				return datas;
-			}
-		}
-	}
-
 	private newPeer(uid: string, passive: boolean) {
-		const s = new peer(uid, this.servers, (type: string, data: Object) => this.trigger(type, data));
+		const s = new peer(uid, this.opts, (type: string, data: Object) => this.trigger(type, data));
 		streams.set(uid, s)
 		passive ? s.waitForConnect() : s.connect()
 	}

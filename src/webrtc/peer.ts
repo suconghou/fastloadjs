@@ -1,6 +1,10 @@
-import { bufferItem, rtcRecv } from '../lib/types';
+import { bufferItem, fastConfig, hostsMap, peerStat, resolveTask, rtcRecv } from '../lib/types';
 import { globalBuffer } from '../lib/utils/bufferCenter';
-import { ws, uuid, warn, info, log, decode, concatArrayBuffers } from './util/util'
+import { info, log, warn } from '../lib/utils/util';
+import { uuid, decode, concatArrayBuffers, singal, encode, isServer } from './util/util'
+import ws from './util/ws';
+
+const rtcMax = 64 * 1024
 
 export default class {
 
@@ -17,9 +21,35 @@ export default class {
     private buffers: Map<string, Array<ArrayBuffer>> = new Map()
 
 
+    // 对端图解
+    private hosts: hostsMap = {}
+    private selfHosts: string
+    private hostsTimer: number;
+
+    // 任务定时器，轮询60内的任务，
+    private resolveTasks: Array<resolveTask> = [];
+    private resolveTaskTimer: number;
+    // 我们的请求任务，如果发现我们已经有了，也自动发送quit
+    private queryTasks: Array<resolveTask> = [];
+
+    private $ws: ws;
+    private me = uuid();
+
     // trigger open/close/error/message
-    constructor(public readonly id: string, private readonly servers: RTCConfiguration, private readonly trigger: (type: string, data: Object) => void) {
+    constructor(public readonly id: string, private readonly opts: fastConfig, private readonly trigger: (type: string, data: Object) => void) {
+        this.isServer = isServer(id)
+        this.$ws = singal(opts.tracker)
         this.init();
+        this.resolveTaskTimer = setInterval(() => this.doTask(), 2e3);
+    }
+
+    public destroy() {
+        clearInterval(this.resolveTaskTimer);
+        clearInterval(this.hostsTimer);
+    }
+
+    get cansend(): boolean {
+        return this.dc && this.dc.readyState == 'open'
     }
 
     private init() {
@@ -30,14 +60,14 @@ export default class {
                 log(e)
             }
         }
-        this.c = new RTCPeerConnection(this.servers);
+        this.c = new RTCPeerConnection(this.opts.rtcConf);
         this.c.onnegotiationneeded = async (ev: Event) => {
             log(ev)
             try {
                 const offer = await this.c.createOffer();
                 await this.c.setLocalDescription(offer)
                 // send sdp to ws server
-                ws().sendJson({ event: 'offer', to: this.id, from: uuid(), data: offer })
+                this.$ws.sendJson({ event: 'offer', to: this.id, from: this.me, data: offer })
                 log(offer)
             } catch (e) {
                 warn(e)
@@ -79,17 +109,60 @@ export default class {
             if (ev.candidate) {
                 const data = {
                     event: 'candidate',
-                    from: uuid(),
+                    from: this.me,
                     to: this.id,
                     data: ev.candidate
                 }
-                ws().sendJson(data)
+                this.$ws.sendJson(data)
                 log("send candidate", data)
             }
         }
     }
 
     public waitForConnect() {
+    }
+
+    private doTask() {
+        const t = Date.now();
+        this.resolveTasks = this.resolveTasks.filter((item) => {
+            // 如果查找到了，则回复给他，然后清理这个任务
+            const buf = globalBuffer.get(item.id, item.sn)
+            if (buf && this.cansend) {
+                this.sendBuffer(buf);
+                return false
+            }
+            // 如果是时间相差比较久的，自动放弃这个任务，超过60s还未解决的
+            if (t - item.t > 60e3) {
+                return false
+            }
+            return true;
+        })
+
+        // 2. 对我们已经发出去请求，但是我们现在已经持有的，发送quit消息;如果这个索要请求是60s前发送的，则无需发送quit,默认已失效了
+        const q: Map<string, Set<number>> = new Map();
+        this.queryTasks = this.queryTasks.filter(item => {
+            const buf = globalBuffer.get(item.id, item.sn)
+            if (buf) {
+                const v = q.get(item.id)
+                if (v) {
+                    v.add(item.sn)
+                } else {
+                    q.set(item.id, new Set([item.sn]))
+                }
+                return false
+            }
+            if (t - item.t > 60e3) {
+                return false
+            }
+            return true
+        })
+        // 根据上面的分析，发送quit消息
+        if (!this.cansend) {
+            return
+        }
+        for (const [id, parts] of q) {
+            this.send(JSON.stringify({ event: 'quit', data: { id, parts: Array.from(parts) } }))
+        }
     }
 
     // 我主动链接这个ID
@@ -109,7 +182,7 @@ export default class {
             this.dc.bufferedAmountLowThreshold = 65536;
             this.dcInit()
         }
-        if (this.c && this.c.connectionState == 'connected' && this.dc && this.dc.readyState == 'open') {
+        if (this.c && this.c.connectionState == 'connected' && this.cansend) {
             info("connection to ", this.id, " is already open")
             // 对方刷新时,我方执行此逻辑;这个到底是不是链接着的,我们再发送一个ping探测一下
             this.send(JSON.stringify({ event: 'ping' }))
@@ -120,6 +193,23 @@ export default class {
         connect();
     }
 
+    private sendHosts(force = false) {
+        // 当前链接的是个ServerPeer,则不用给他发送
+        if (!this.cansend) {
+            return
+        }
+        if (this.isServer) {
+            return
+        }
+        const hosts = globalBuffer.hosts()
+        const str = JSON.stringify({ event: 'hosts', data: hosts })
+        if (!force && (str == this.selfHosts)) {
+            return
+        }
+        this.send(str);
+        this.selfHosts = str;
+    }
+
     private dcInit() {
         window.addEventListener('beforeunload', () => {
             this.c.close()
@@ -127,8 +217,11 @@ export default class {
         })
         this.dc.onopen = (e) => {
             this.activetime = Date.now()
-            warn("dc open me : " + uuid() + " remote: " + this.id, e)
+            warn("dc open me : " + this.me + " remote: " + this.id, e)
             this.trigger('open', { id: this.id, data: e });
+            this.sendHosts(true)
+            clearInterval(this.hostsTimer)
+            this.hostsTimer = setInterval(() => this.sendHosts(), 15e3)
         }
         this.dc.onclose = e => {
             warn("dc close " + this.id, e)
@@ -161,6 +254,52 @@ export default class {
     // TODO trigger message/buffer/buffer.recv
     private extract(data: ArrayBuffer) {
         if (!(data instanceof ArrayBuffer)) {
+            const info = JSON.parse(data)
+            switch (info.event) {
+                case 'hosts':
+                    this.hosts = info.data as hostsMap
+                    return
+                case 'ping':
+                    this.send(JSON.stringify({ event: 'pong' }))
+                    return
+                case 'pong':
+                    return
+                case 'resolve':
+                    {
+                        // 对端批量查询了，我们批量回复
+                        const id: string = info.data.id;
+                        const parts: Array<number> = info.data.parts
+                        const t = Date.now()
+                        for (const sn of parts) {
+                            const item = globalBuffer.get(id, sn)
+                            if (!item) {
+                                // 当前我们没有这个buffer,我们就将它加入到任务队列，在60s内如果我们拥有了，则会发送给他，如果太久则自动放弃
+                                this.resolveTasks.push({
+                                    id,
+                                    t,
+                                    sn,
+                                })
+                                continue
+                            }
+                            this.sendBuffer(item)
+                        }
+                    }
+                    return
+                case 'quit':
+                    {
+                        const id: string = info.data.id;
+                        const parts: Array<number> = info.data.parts
+                        // 对方之前索要过，但是现在要放弃，必然是对方60s内发送过索要请求，如果对方发送索要请求超过60s,则对方无需发送quit
+                        this.resolveTasks = this.resolveTasks.filter(item => {
+                            if (item.id == id && parts.includes(item.sn)) {
+                                return false
+                            }
+                            return true
+                        })
+
+                    }
+                    return
+            }
             return this.trigger('message', { data, id: this.id })
         }
         const info: rtcRecv = decode(data)
@@ -172,6 +311,13 @@ export default class {
             b[info.i] = info.data
             this.buffers.set(info.id, b)
         }
+        // 我们发出的请求得到回应了，我们清理这个进行中的队列
+        this.queryTasks = this.queryTasks.filter((it) => {
+            if (it.id == info.id && it.sn == info.sn) {
+                return false
+            }
+            return true
+        })
         // 分片传输中,可用于进度提示
         this.trigger('buffer.recv', { data: info, id: this.id })
         let done = true;
@@ -207,6 +353,37 @@ export default class {
         }
     }
 
+    // TODO may check conection status
+    private sendBuffer(data: bufferItem) {
+        const datas = this.splitBuffer(data)
+        for (let i = 0; i < datas.length; i++) {
+            const item = datas[i]
+            this.send(item)
+        }
+    }
+
+    private splitBuffer(data: bufferItem): Array<ArrayBuffer> {
+        let i = 0;
+        let last = false;
+        const l = data.buffer.byteLength
+        const datas: Array<ArrayBuffer> = [];
+        const n = Math.ceil(l / rtcMax)
+        while (true) {
+            const start = rtcMax * i;
+            let end = rtcMax * (i + 1)
+            if (end >= l) {
+                end = l
+                last = true
+            }
+            const v = data.buffer.slice(start, end)
+            datas.push(encode(v, data.id, data.part, i, n))
+            i++
+            if (last) {
+                return datas;
+            }
+        }
+    }
+
     public async onOffer(sdp: RTCSessionDescription) {
         if (this.c.signalingState == 'closed') {
             warn("onOffer error signalingState is closed");
@@ -218,13 +395,15 @@ export default class {
         // PeerConnection cannot create an answer in a state other than have-remote-offer or have-local-pranswer.
         const data = {
             event: "answer",
-            from: uuid(),
+            from: this.me,
             to: this.id,
             data: answer,
         }
         log("send answer", data)
-        ws().sendJson(data)
+        this.$ws.sendJson(data)
     }
+
+
 
     public async onAnswer(sdp: RTCSessionDescription) {
         if (['closed'].includes(this.c.signalingState)) {
@@ -243,6 +422,21 @@ export default class {
         }
         this.c.addIceCandidate(candidate)
         log("made connection ", this.id)
+    }
+
+
+    // 发送索要请求
+    resolve(id: string, parts: Array<number>) {
+        const data = JSON.stringify({ event: 'resolve', data: { id, parts } })
+        this.send(data)
+        const t = Date.now()
+        for (const sn of parts) {
+            this.queryTasks.push({
+                id,
+                t,
+                sn
+            })
+        }
     }
 
     // TODO improve this
@@ -271,15 +465,17 @@ export default class {
 
     }
 
-    stat() {
+    stat(): peerStat {
         return {
             tx: this.tx,
             rx: this.rx,
-            state: this.dc ? this.dc.readyState : '',
-            cstate: this.c ? this.c.connectionState : '',
-            istate: this.c ? this.c.iceConnectionState : '',
-            gstate: this.c ? this.c.iceGatheringState : '',
+            state: this.dc ? this.dc.readyState : null,
+            cstate: this.c ? this.c.connectionState : null,
+            istate: this.c ? this.c.iceConnectionState : null,
+            gstate: this.c ? this.c.iceGatheringState : null,
             activetime: this.activetime,
+            isServer: this.isServer,
+            hosts: this.hosts,
         }
     }
 }

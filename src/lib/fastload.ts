@@ -5,21 +5,8 @@ import tasks from "./tasks/index";
 import dispatcher from './dispatcher'
 import { sleep } from './utils/util'
 import event from "./utils/event";
-import libwebrtc from '../libwebrtc/index'
+import libwebrtc from '../webrtc/index'
 import { globalBuffer } from "./utils/bufferCenter";
-
-const iceServers = {
-	"iceServers": [
-		{
-			urls: "stun:119.29.1.39:3478",
-		},
-		{
-			urls: "turn:119.29.1.39:3478",
-			username: "su",
-			credential: "su"
-		},
-	]
-};
 
 
 export default class fastload extends event {
@@ -28,23 +15,22 @@ export default class fastload extends event {
 
 	protected config: fastConfig;
 
-	public dispatcher: dispatcher
+	private dispatcher: dispatcher
 
 	private worker: workers
 
 	private err: Error
 
+	private P2P = window.RTCPeerConnection;
+
 	private defaultOpts = {
 		retry: 5,
 		thread: 2,
 		wsize: 12,
-		p2p: false,
 	}
 
 	// 由外部注入,提供直接操作sourceBuffer的入口
 	private bufferCtrl: bufferController
-
-	private rtcLoop: number;
 
 	private rtcEvcancel: Function = () => { }
 
@@ -58,29 +44,27 @@ export default class fastload extends event {
 
 	private rtcPendings: objectMap<number> = {}
 
-	constructor(opts: fastConfig) {
+	constructor(private opts: fastConfig) {
 		super()
 		this.config = { ...this.defaultOpts, ...opts }
-		if (this.config.p2p && window.RTCPeerConnection) {
-			fastload.rtc()
+		if (this.P2P) {
+			this.rtc()
 		}
 	}
 
 	// 此API仅调能用一次
-	public init(bufferCtrl: bufferController): this {
+	public init(bufferCtrl: bufferController, disp: dispatcher): this {
 		const { thread, retry } = this.config
-		if (!this.dispatcher) {
-			throw new Error('must set dispatcher before start')
-		}
 		this.bufferCtrl = bufferCtrl
+		this.dispatcher = disp;
 		bufferCtrl.listen('pause', () => {
 			// buffer is full
 			this.pause()
 			this.bufferInuse.clear()
 		})
 		this.worker = new workers(thread, retry, (res: partResponse) => this.taskDone(res))
-		if (this.config.p2p && window.RTCPeerConnection) {
-			this.rtcLoop = setTimeout(() => this.rtcInit(), 0)
+		if (this.P2P) {
+			this.rtcInit()
 		}
 		for (let i = 0; i < thread; i++) {
 			// 开启相应的线程数
@@ -186,10 +170,6 @@ export default class fastload extends event {
 			this.bufferCtrl.push(buffer)
 			this.bufferInuse.add(res.no)
 		}
-		if (this.config.p2p && window.RTCPeerConnection) {
-			const rtc = fastload.rtc()
-			rtc.found(this.config.meta, res.no)
-		}
 		return this.triggerNextTask();
 	}
 
@@ -271,8 +251,7 @@ export default class fastload extends event {
 	}
 
 	private rtcInit() {
-		const rtc = fastload.rtc()
-		clearTimeout(this.rtcLoop)
+		const rtc = this.rtc()
 		const query = (parts: Array<number>) => { rtc.query(this.config.meta, parts,) }
 		const hasAlivePeer = (stat: any): Boolean => {
 			for (let key in stat) {
@@ -347,14 +326,12 @@ export default class fastload extends event {
 				this.rtcPendings[item.no] = t
 			}
 			query(parts)
-			this.rtcLoop = setTimeout(task, 2e3)
 		}
-		this.rtcLoop = setTimeout(task, 0)
 		this.rtcEvcancel = this.rtcEventInit()
 	}
 
 	private rtcEventInit(): Function {
-		const rtc = fastload.rtc()
+		const rtc = this.rtc()
 		const events: Array<Function> = [];
 		const bufferProgress = ({ id, i, n, uid }) => {
 			// 传输进行中,此处的id是 meta|part 的形式
@@ -424,18 +401,16 @@ export default class fastload extends event {
 	}
 
 	private rtcReset() {
-		clearTimeout(this.rtcLoop)
 		this.rtcEvcancel()
 		if (fastload.rtcInstance) {
 			fastload.rtcInstance.clear()
 		}
 	}
 
-	static rtc(): libwebrtc {
-		if (!this.rtcInstance) {
-			this.rtcInstance = new libwebrtc(iceServers)
-			this.rtcInstance.init()
+	private rtc(): libwebrtc {
+		if (!fastload.rtcInstance) {
+			fastload.rtcInstance = new libwebrtc(this.opts)
 		}
-		return this.rtcInstance
+		return fastload.rtcInstance
 	}
 }

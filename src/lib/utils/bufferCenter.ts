@@ -1,4 +1,4 @@
-import { bufferItem } from "../types";
+import { bufferItem, hostsMap } from "../types";
 
 // ttl cache
 export default class bufferCenter {
@@ -11,12 +11,13 @@ export default class bufferCenter {
         setInterval(() => this.expire(), 60e3)
     }
 
-    any(id: string): bufferItem {
-        if (this.buffers.has(id)) {
-            for (const [_, part] of this.buffers.get(id)) {
-                return part
-            }
+    hosts(): hostsMap {
+        const infos: hostsMap = {};
+        for (const [id, file] of this.buffers) {
+            const parts: Array<number> = Array.from(file.keys());
+            infos[id] = parts;
         }
+        return infos;
     }
 
     part(id: string): Map<number, bufferItem> {

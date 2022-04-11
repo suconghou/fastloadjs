@@ -4,8 +4,9 @@ export interface fastConfig {
 	readonly retry: number;
 	readonly req: string;
 	readonly meta: string // vid:itag , for part :  vid:itag|part
+	readonly tracker: string
 	readonly mirrors: Array<string>
-	readonly p2p: boolean
+	readonly rtcConf: RTCConfiguration,
 }
 
 export interface partResponse {
@@ -41,6 +42,16 @@ export interface objectMap<T> {
 }
 
 
+export interface objectStrMap<T> {
+	[key: string]: T
+}
+
+
+export interface hostsMap {
+	[key: string]: Array<number>
+}
+
+
 export interface bufferItem {
 	readonly id: string
 	readonly part: number
@@ -69,3 +80,26 @@ export interface rtcRecv {
 	n: number, // 共计多少块
 	data: ArrayBuffer
 }
+
+
+export interface peerStat {
+	tx: number
+	rx: number
+	state: RTCDataChannelState,
+	cstate: RTCPeerConnectionState,
+	istate: RTCIceConnectionState,
+	gstate: RTCIceGatheringState,
+	activetime: number,
+	isServer: boolean,
+	hosts: hostsMap,
+}
+
+
+export interface resolveTask {
+	id: string,
+	sn: number,
+	t: number
+}
+
+
+
