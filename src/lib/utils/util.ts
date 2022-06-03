@@ -2,9 +2,9 @@
 
 const logevel = sessionStorage.getItem('loglevel')
 
-export const warn = ['warn', 'info', 'log'].includes(logevel) ? console.warn.bind(console) : () => { }
-export const info = ['info', 'log'].includes(logevel) ? console.info.bind(console) : () => { }
-export const log = ['log'].includes(logevel) ? console.log.bind(console) : () => { }
+export const log_warn = ['warn', 'info', 'log'].includes(logevel) ? console.warn.bind(console) : () => { }
+export const log_info = ['info', 'log'].includes(logevel) ? console.info.bind(console) : () => { }
+export const log_log = ['log'].includes(logevel) ? console.log.bind(console) : () => { }
 
 
 export const sleep = async (ms: number) => {

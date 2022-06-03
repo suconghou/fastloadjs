@@ -102,7 +102,8 @@ export const decode = (data: ArrayBuffer): rtcRecv => {
         sn,
         i,
         n,
-        data: body
+        data: body,
+        t: Date.now()
     }
     return ret
 }

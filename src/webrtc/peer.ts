@@ -1,10 +1,10 @@
 import { bufferItem, fastConfig, hostsMap, peerStat, resolveTask, rtcRecv } from '../lib/types';
 import { globalBuffer } from '../lib/utils/bufferCenter';
-import { info, log, warn } from '../lib/utils/util';
+import { log_info, log_log, log_warn } from '../lib/utils/util';
 import { uuid, decode, concatArrayBuffers, singal, encode, isServer } from './util/util'
 import ws from './util/ws';
 
-const rtcMax = 64 * 1024
+const rtcMax = 60 * 1024
 
 export default class {
 
@@ -13,12 +13,14 @@ export default class {
     private tx: number = 0
     private rx: number = 0
     private restart: number = 0
-    private activetime: number = 0
-    private isServer: boolean
+    private activetime: number = 0;
+    private isServer: boolean;
+    private speed: number = 0; // 链接速度
+
 
 
     // 缓存分包的rtc数据，收到完整的一个包后清理缓存
-    private buffers: Map<string, Array<ArrayBuffer>> = new Map()
+    private buffers: Map<string, Array<rtcRecv>> = new Map()
 
 
     // 对端图解
@@ -39,7 +41,7 @@ export default class {
     constructor(public readonly id: string, private readonly opts: fastConfig, private readonly trigger: (type: string, data: Object) => void) {
         this.isServer = isServer(id)
         this.$ws = singal(opts.tracker)
-        this.init();
+        this.init()
         this.resolveTaskTimer = setInterval(() => this.doTask(), 2e3);
     }
 
@@ -57,20 +59,20 @@ export default class {
             try {
                 this.c.close()
             } catch (e) {
-                log(e)
+                log_log(e)
             }
         }
         this.c = new RTCPeerConnection(this.opts.rtcConf);
         this.c.onnegotiationneeded = async (ev: Event) => {
-            log(ev)
+            log_log(ev)
             try {
                 const offer = await this.c.createOffer();
                 await this.c.setLocalDescription(offer)
                 // send sdp to ws server
                 this.$ws.sendJson({ event: 'offer', to: this.id, from: this.me, data: offer })
-                log(offer)
+                log_log(offer)
             } catch (e) {
-                warn(e)
+                log_warn(e)
             }
         }
 
@@ -80,32 +82,32 @@ export default class {
                 try {
                     this.dc.close()
                 } catch (e) {
-                    log(e)
+                    log_log(e)
                 }
             }
             this.dc = ev.channel
             this.dc.binaryType = 'arraybuffer'
-            this.dc.bufferedAmountLowThreshold = 65536
+            this.dc.bufferedAmountLowThreshold = rtcMax
             this.dcInit()
-            log(ev)
+            log_log(ev)
         }
         this.c.onconnectionstatechange = (ev: Event) => {
-            log(ev)
+            log_log(ev)
         }
         this.c.onicecandidateerror = (ev: Event) => {
-            warn(ev)
+            log_warn(ev)
         }
 
         this.c.onicegatheringstatechange = (ev: Event) => {
-            log(ev)
+            log_log(ev)
         }
 
         this.c.oniceconnectionstatechange = (ev: Event) => {
-            log(ev)
+            log_log(ev)
         }
 
         this.c.onicecandidate = (ev) => {
-            log(ev)
+            log_log(ev)
             if (ev.candidate) {
                 const data = {
                     event: 'candidate',
@@ -114,7 +116,7 @@ export default class {
                     data: ev.candidate
                 }
                 this.$ws.sendJson(data)
-                log("send candidate", data)
+                log_log("send candidate", data)
             }
         }
     }
@@ -122,6 +124,9 @@ export default class {
     public waitForConnect() {
     }
 
+    // 1. 对于对方索要的我们检查，如果发现了，发送给对方
+    // 2. 对于我们索要的，如果我们已经有了，则发送quit
+    // 即使已经断线，这些数据也要正常维护
     private doTask() {
         const t = Date.now();
         this.resolveTasks = this.resolveTasks.filter((item) => {
@@ -167,26 +172,27 @@ export default class {
 
     // 我主动链接这个ID
     async connect() {
-        log("i connect ", this.id)
+        log_log("i connect ", this.id)
         const connect = () => {
             this.init()
             if (this.dc) {
                 try {
                     this.dc.close()
                 } catch (e) {
-                    log(e)
+                    log_warn(e)
                 }
             }
             this.dc = this.c.createDataChannel("dc", { maxPacketLifeTime: 2000 })
             this.dc.binaryType = 'arraybuffer'
-            this.dc.bufferedAmountLowThreshold = 65536;
+            this.dc.bufferedAmountLowThreshold = rtcMax;
             this.dcInit()
         }
         if (this.c && this.c.connectionState == 'connected' && this.cansend) {
-            info("connection to ", this.id, " is already open")
+            log_info("connection to ", this.id, " is already open")
             // 对方刷新时,我方执行此逻辑;这个到底是不是链接着的,我们再发送一个ping探测一下
             this.send(JSON.stringify({ event: 'ping' }))
             clearTimeout(this.restart)
+            // 如果我们5秒内收到响应了（pong）,则重连任务将会取消
             this.restart = setTimeout(() => connect(), 5e3)
             return
         }
@@ -216,25 +222,26 @@ export default class {
             this.dc.close()
         })
         this.dc.onopen = (e) => {
-            this.activetime = Date.now()
-            warn("dc open me : " + this.me + " remote: " + this.id, e)
+            log_warn("dc open me : " + this.me + " remote: " + this.id, e)
             this.trigger('open', { id: this.id, data: e });
+            this.activetime = Date.now()
             this.sendHosts(true)
             clearInterval(this.hostsTimer)
             this.hostsTimer = setInterval(() => this.sendHosts(), 15e3)
         }
         this.dc.onclose = e => {
-            warn("dc close " + this.id, e)
+            log_warn("dc close " + this.id, e)
             this.trigger('close', { id: this.id, data: e });
         }
         this.dc.onerror = e => {
-            warn("dc error " + this.id, e)
+            log_warn("dc error " + this.id, e)
             this.trigger('error', { id: this.id, data: e });
         }
         this.dc.onbufferedamountlow = () => {
             // 如果我们有发送任务，在此处发送
         }
         this.dc.onmessage = async (e) => {
+            // 如果有重连任务，取消他
             clearTimeout(this.restart)
             let data = e.data;
             if (data instanceof Blob) {
@@ -251,8 +258,8 @@ export default class {
         }
     }
 
-    // TODO trigger message/buffer/buffer.recv
-    private extract(data: ArrayBuffer) {
+    // trigger message/buffer/buffer.recv
+    private extract(data: ArrayBuffer | string) {
         if (!(data instanceof ArrayBuffer)) {
             const info = JSON.parse(data)
             switch (info.event) {
@@ -287,9 +294,9 @@ export default class {
                     return
                 case 'quit':
                     {
+                        // 对方之前索要过，但是现在要放弃，必然是对方60s内发送过索要请求，如果对方发送索要请求超过60s,则对方无需发送quit
                         const id: string = info.data.id;
                         const parts: Array<number> = info.data.parts
-                        // 对方之前索要过，但是现在要放弃，必然是对方60s内发送过索要请求，如果对方发送索要请求超过60s,则对方无需发送quit
                         this.resolveTasks = this.resolveTasks.filter(item => {
                             if (item.id == id && parts.includes(item.sn)) {
                                 return false
@@ -303,13 +310,14 @@ export default class {
             return this.trigger('message', { data, id: this.id })
         }
         const info: rtcRecv = decode(data)
-        const item = this.buffers.get(info.id)
+        const bufKey = info.id + ':' + info.sn
+        const item = this.buffers.get(bufKey)
         if (item) {
-            item[info.i] = info.data
+            item[info.i] = info
         } else {
-            const b: Array<ArrayBuffer> = [];
-            b[info.i] = info.data
-            this.buffers.set(info.id, b)
+            const b: Array<rtcRecv> = [];
+            b[info.i] = info
+            this.buffers.set(bufKey, b)
         }
         // 我们发出的请求得到回应了，我们清理这个进行中的队列
         this.queryTasks = this.queryTasks.filter((it) => {
@@ -321,7 +329,7 @@ export default class {
         // 分片传输中,可用于进度提示
         this.trigger('buffer.recv', { data: info, id: this.id })
         let done = true;
-        const c = this.buffers.get(info.id)
+        const c = this.buffers.get(bufKey)
         for (let j = 0; j < info.n; j++) {
             if (!c[j]) {
                 done = false
@@ -332,11 +340,15 @@ export default class {
             return
         }
         // 全部分片已持有,合并所有分片
-        let buffers: ArrayBuffer = c[0]
+        let buffers: ArrayBuffer = c[0].data
+        const times: Array<number> = [c[0].t];
         for (let j = 1; j < info.n; j++) {
-            buffers = concatArrayBuffers(buffers, c[j])
+            buffers = concatArrayBuffers(buffers, c[j].data)
+            times.push(c[j].t)
         }
-        this.buffers.delete(info.id)
+        this.buffers.delete(bufKey)
+        const timeCost = Math.max(...times) - Math.min(...times);
+        this.speed = Math.round((buffers.byteLength / 1024) / (timeCost < 1 ? 1 : timeCost / 1000));
         let partItem: bufferItem = globalBuffer.get(info.id, info.sn)
         const newly = !partItem
         if (!partItem) {
@@ -349,11 +361,10 @@ export default class {
         }
         this.trigger('buffer', { data: partItem, newly, id: this.id })
         if (!newly) {
-            console.info('already have buffer', partItem)
+            log_info('already have buffer', partItem)
         }
     }
 
-    // TODO may check conection status
     private sendBuffer(data: bufferItem) {
         const datas = this.splitBuffer(data)
         for (let i = 0; i < datas.length; i++) {
@@ -386,7 +397,7 @@ export default class {
 
     public async onOffer(sdp: RTCSessionDescription) {
         if (this.c.signalingState == 'closed') {
-            warn("onOffer error signalingState is closed");
+            log_warn("onOffer error signalingState is closed");
             return
         }
         await this.c.setRemoteDescription(sdp)
@@ -399,7 +410,7 @@ export default class {
             to: this.id,
             data: answer,
         }
-        log("send answer", data)
+        log_log("send answer", data)
         this.$ws.sendJson(data)
     }
 
@@ -407,21 +418,21 @@ export default class {
 
     public async onAnswer(sdp: RTCSessionDescription) {
         if (['closed'].includes(this.c.signalingState)) {
-            warn("onAnswer error signalingState is " + this.c.signalingState)
+            log_warn("onAnswer error signalingState is " + this.c.signalingState)
             return
         }
         await this.c.setRemoteDescription(sdp)
-        info('setRemoteDescription', sdp)
+        log_info('setRemoteDescription', sdp)
         // 设置后,链接建立完毕
     }
 
     public async onCandidate(candidate: RTCIceCandidate) {
         if (['closed'].includes(this.c.signalingState)) {
-            warn("onCandidate error signalingState is " + this.c.signalingState)
+            log_warn("onCandidate error signalingState is " + this.c.signalingState)
             return
         }
         this.c.addIceCandidate(candidate)
-        log("made connection ", this.id)
+        log_log("made connection ", this.id)
     }
 
 
@@ -439,14 +450,13 @@ export default class {
         }
     }
 
-    // TODO improve this
     send(data: any) {
         if (!this.dc) {
-            log("data channel to " + this.id + " is not avaiable")
+            log_log("data channel to " + this.id + " is not avaiable")
             return
         }
         if (this.dc.readyState !== 'open') {
-            log("data channel to " + this.id + " is not open")
+            log_log("data channel to " + this.id + " is not open")
             return
         }
         try {
@@ -458,7 +468,7 @@ export default class {
             }
             return r
         } catch (e) {
-            warn(e)
+            log_warn(e)
             // 尝试重新建立连接
             this.connect()
         }
@@ -475,6 +485,7 @@ export default class {
             gstate: this.c ? this.c.iceGatheringState : null,
             activetime: this.activetime,
             isServer: this.isServer,
+            speed: this.speed,
             hosts: this.hosts,
         }
     }

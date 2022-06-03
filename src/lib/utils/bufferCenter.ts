@@ -74,6 +74,9 @@ export default class bufferCenter {
                     s.delete(part)
                     if (this.buffers.has(id)) {
                         this.buffers.get(id).delete(part)
+                        if (num-- < this.maxItmes) {
+                            break
+                        }
                     }
                 }
             }

@@ -12,7 +12,6 @@ export default class extends event {
 
 	// 记录与我们播放和持有的相关资源
 	private hostIds: Set<string> = new Set()
-
 	// 当前ws链接已经持有的IDS
 	private wsIds: Set<string> = new Set()
 
@@ -57,22 +56,25 @@ export default class extends event {
 
 	private init() {
 		this.$ws
-			.listen('offer', (data: any) => {
-				this.onOffer(data.from, data.data)
-			})
-			.listen("answer", (data: any) => {
-				this.onAnswer(data.from, data.data)
-			})
-			.listen("candidate", (data: any) => {
-				this.onCandidate(data.from, data.data)
-			})
+			.listen('offer', (data: any) => this.onOffer(data.from, data.data))
+			.listen("answer", (data: any) => this.onAnswer(data.from, data.data))
+			.listen("candidate", (data: any) => this.onCandidate(data.from, data.data))
 			.listen('online', (data: any) => {
 				if (data.id != this.me) {
 					this.toConnect(data.id)
 				}
 			})
-			.listen('init', (data: any) => {
-				this.waitIds(data.ids)
+			.listen('init', (data: any) => this.waitIds(new Set(data.ids)))
+			.listen('open', () => {
+				if (this.hostIds.size) {
+					// 无论是断线重连还是首次，都可以发送
+					this.$ws.sendJson({ event: 'join', ids: [...this.hostIds] })
+					this.wsIds = new Set(this.hostIds)
+				}
+			}).listen('close', () => {
+				this.wsIds = new Set()
+			}).listen('error', () => {
+				this.wsIds = new Set()
 			})
 	}
 
@@ -103,7 +105,7 @@ export default class extends event {
 		passive ? s.waitForConnect() : s.connect()
 	}
 
-	private waitIds(ids: Array<string>) {
+	private waitIds(ids: Set<string>) {
 		ids.forEach(id => {
 			if (streams.has(id)) {
 				// 是我断线重连,无论这些ID中,之前有我主动链接他的,也有他主动链接我的

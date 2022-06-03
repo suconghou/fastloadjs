@@ -78,7 +78,8 @@ export interface rtcRecv {
 	sn: number,
 	i: number, // 当前传输块序号
 	n: number, // 共计多少块
-	data: ArrayBuffer
+	data: ArrayBuffer,
+	t: number, //生成时间
 }
 
 
@@ -91,6 +92,7 @@ export interface peerStat {
 	gstate: RTCIceGatheringState,
 	activetime: number,
 	isServer: boolean,
+	speed: number,
 	hosts: hostsMap,
 }
 
