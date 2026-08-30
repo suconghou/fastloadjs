@@ -1,9 +1,10 @@
-import { uuid, eqSet, emit, } from '../../util/util'
+import { uuid, eqSet, emit, log_log, } from '../../util/util'
 import event from '../../util/event'
-import { config, fragment, objectStrMap, peerStat, resolvingInfo, rtcReqRet, } from '../../types'
-import singal from './util'
+import { rtcConfig, fragment, objectStrMap, peerStat, resolvingInfo, rtcReqRet, } from '../../types'
+import singal, { closeSignal } from './util'
 import peer from './peer'
 import ws from '../../util/ws';
+import { globalBuffer } from '../../util/bufferCenter'
 
 interface peerItem {
 	readonly stat: peerStat
@@ -25,21 +26,45 @@ export default class extends event {
 	private wsIds: Set<string> = new Set()
 
 	private me: string = uuid()
-	private $ws: ws;
+	private $ws: ws | null = null;
 
-	private resolving: Map<number, resolvingInfo> = new Map();
+	// 按 swarmId:sn 记录进行中的p2p请求,多swarm共用此实例
+	private resolving: Map<string, resolvingInfo> = new Map();
+
+	// 根据速度等指标，对某些peer禁用一分钟
+	private disabledPeers: Map<string, number> = new Map();
 
 	// trigger open/close/error/message
 	// message 事件拆解，message.buffer buffer
-	constructor(private readonly opts: config) {
+	constructor(private readonly opts: rtcConfig) {
 		super()
 		if (opts.tracker && typeof window.RTCPeerConnection == 'function') {
 			this.$ws = singal(opts.tracker);
-			this.init();
+			this.init(this.$ws);
 			setInterval(() => {
 				const data = this.getStats()
 				if (Object.keys(data).length) {
 					emit('peers', data)
+				}
+				const retryMap: Map<string, Array<fragment>> = new Map();
+				const now = Date.now();
+				for (const [key, item] of this.resolving) {
+					const has = globalBuffer.get(item.id, item.sn)
+					if (has) {
+						this.resolving.delete(key)
+						continue
+					}
+					if (now - item.t >= 60e3) {
+						const arr = retryMap.get(item.id)
+						if (arr) {
+							arr.push({ sn: item.sn })
+						} else {
+							retryMap.set(item.id, [{ sn: item.sn }])
+						}
+					}
+				}
+				for (const [id, parts] of retryMap) {
+					this.req(id, parts)
 				}
 			}, 2e3)
 			this.enable = true
@@ -53,33 +78,49 @@ export default class extends event {
 	// 4. 重试时，15s内的不重复发送，除非上次是guess,本次直接找到了
 	// 5. 重试时，排除上次发送的那个peer,在剩余的找也持有我们需要的
 	// 6. 如果找不到，还是按照server peers,然后猜测最佳client peers算法
-	// cachedNum 是往后50分片中，有多少分片已经持有了，如果分片多，则retry可以多等待一会
-	req(id: string, parts: Array<fragment>, cachedNum: number): rtcReqRet {
+	// parts.length 5-15
+	req(id: string, parts: Array<fragment>): rtcReqRet {
 		if (!this.enable) {
 			// P2P功能已禁用
-			return { unresolved_retry: [], guessed_retry: [], unresolved: parts, guessed: [] }
+			return { unresolved_retry: [], guessed_retry: [], unresolved: parts, guessed: [], guessed_eachother: [] }
 		}
+		const bufferedSeconds = this.opts.buffered ? this.opts.buffered() : 0;
 		this.join(id);
 		const t = Date.now();
+		const tMinute = Math.floor(t / 1e3 / 60);
 		let last: Array<fragment> = [...parts];
 		const s = this.getStats();
 		const servers_arr: Array<peerItem> = [];
 		const clients_arr: Array<peerItem> = [];
 		for (const [uid, peerItem] of Object.entries(s)) {
-			if (peerItem.state !== 'open') {
-				continue
+			// 仅判断RTCDataChannelState的状态是不准确的，还需要判断RTCPeerConnectionState
+			if (!(peerItem?.state === 'open' && peerItem?.cstate === 'connected')) {
+				continue;
 			}
 			const p = streams.get(uid)
 			if (!p) {
 				continue
 			}
-			if (peerItem.speed <= 0 && peerItem.packet > 5) {
-				// 接收了很多数据了，但是没有计算出速度，可能丢包严重，排除掉这个peer,无论是client还是server
-				continue
+			const disinfo = this.disabledPeers.get(uid)
+			let retry = false;
+			if (disinfo) {
+				// 有禁用的信息
+				if (disinfo === tMinute) {
+					// 仍然在禁用的1分钟内
+					continue
+				}
+				// 禁用已过期
+				retry = true; // 此节点可以再次探测
+				this.disabledPeers.delete(uid)
 			}
 			// 如果这个是个中继，或者速度很慢，或者丢包严重，并且我们有server peer了，或者有client peer持有现在所需数据，则放弃这个peer
-			if ((last.length == 0 || servers_arr.length > 0) && (peerItem.relay || (peerItem.speed > 0 && peerItem.speed < 100) || peerItem.packet > 3)) {
-				continue
+			const pp = peerItem.responseParts / (peerItem.resolveParts || 1); // 回复率
+			if ((last.length == 0 || servers_arr.length > 0) && (peerItem.relay || (peerItem.speed > 0 && peerItem.speed < 60) || (pp > 0 && pp < 0.5))) {
+				// 如果标记了retry,则表明我们已知道节点慢，已禁用了1分钟，此时需要在给他一次机会，有retry时不能continue
+				if (!retry) {
+					this.disabledPeers.set(uid, tMinute)
+					continue
+				}
 			}
 			if (peerItem.isServer) {
 				servers_arr.push({ peer: p, stat: peerItem, blocks: [] })
@@ -104,6 +145,13 @@ export default class extends event {
 			const p = a.stat.packet - b.stat.packet
 			if (p != 0) {
 				return p
+			}
+			// 回复率高的在前
+			const aa = a.stat.responseParts / (a.stat.resolveParts || 1);
+			const bb = b.stat.responseParts / (b.stat.resolveParts || 1);
+			const pp = bb - aa;
+			if (pp != 0) {
+				return pp;
 			}
 			// 速度，丢包，均判断不出来，则非中继的优先
 			if (a.stat.relay !== b.stat.relay) {
@@ -130,10 +178,11 @@ export default class extends event {
 				tasks.set(peer, new Set([task]))
 			}
 		}
-		// 多10个分片，就多等10秒
-		const wait = 15e3 + cachedNum * 1000;
+		// 如果已缓冲了20s,则又加4s,60则12s
+		const wait = 15e3 + Math.random() * 200 * bufferedSeconds;
 		for (const task of parts) {
-			const did = this.resolving.get(task.sn)
+			const taskKey = `${id}:${task.sn}`
+			const did = this.resolving.get(taskKey)
 			const inLast = last.find(it => it.sn == task.sn)
 			const retry = did && t - did.t > wait; // 距离上次已过15s
 			if (did && t - did.t < wait) {
@@ -146,33 +195,37 @@ export default class extends event {
 			if (inLast) {
 				// 这一块数据，所有client peers都没有
 				if (retry) {
-					let found = false;
+					let server_found = false, client_found = false;
 					for (const x of servers_arr) {
 						if (x.peer.id != did.uid) {
 							add_task(x.peer, task)
-							found = true
+							server_found = true
 							break
 						}
 					}
-					if (!found && clients_arr.length) {
+					if (!server_found && clients_arr.length) {
 						const client_max = this.sort_guess_client(task.sn, clients_arr)
 						for (const x of client_max) {
 							if (x.peer.id !== did.uid) {
 								add_task(x.peer, task)
-								found = true
+								client_found = true
 								break
 							}
 						}
 					}
-					if (found) {
-						guessed_retry.push(task)
+					if (server_found || client_found) {
+						if (client_found) {
+							guessed_retry.push(task)
+						}
+						// else server_found, 无需记录，视为已解决
 					} else {
+						// retry 时 client 端没有找到,之前的server peer也用过了,如果开启了prefetch,将会向速度排行快的几个peer索要，若没有开启，则rtc无法获取，后续http将获取
 						unresolved_retry.push(task)
 					}
 
 				} else {
 					// 首先检测是否有进度非常接近的的client peer,如果有，则他的优先级高于server peer
-					const maybe_client = this.sort_guess_client(task.sn, clients_arr, 6);
+					const maybe_client = this.sort_guess_client(task.sn, clients_arr, 10);
 					if (maybe_client.length) {
 						const c = maybe_client[0]
 						add_task(c.peer, task)
@@ -235,7 +288,7 @@ export default class extends event {
 						}
 					}
 					if (!found) {
-						// retry 时，只有上次的那个peer持有，没有可用的server peers,没有除那个peer外，其他peers持有这个，也猜测不出最佳peer
+						// retry 时，只有上次的那个peer持有，没有可用的server peers,没有除那个peer外其他peers持有这个，也猜测不出最佳peer
 						unresolved_retry.push(task)
 					}
 
@@ -269,7 +322,7 @@ export default class extends event {
 					}
 					if (!found) {
 						// 这是不可能的
-						console.error('error found')
+						console.error('not found in all clients_arr', task, clients_arr)
 						unresolved.push(task)
 					}
 				}
@@ -277,17 +330,22 @@ export default class extends event {
 			}
 		}
 		const guessed_sn = guessed.map(item => item.sn)
+		const guessed_each: Set<fragment> = new Set();
 		for (const [peer, parts] of tasks) {
-			peer.resolve(id, parts)
+			// 当我向它索要时，发现它已经向我索要了，后索要者需立即发起http下载,我们存储到guessed_eachother，上层需尽快获取下载
+			const gg: Set<fragment> = peer.resolve(id, parts)
+			gg.forEach(it => guessed_each.add(it))
 			parts.forEach(part => {
-				this.resolving.set(part.sn, { t, uid: peer.id, guess: guessed_sn.includes(part.sn) })
+				this.resolving.set(`${id}:${part.sn}`, { t, uid: peer.id, guess: guessed_sn.includes(part.sn), id, sn: part.sn, })
 			})
 		}
-		return { unresolved, guessed, unresolved_retry, guessed_retry } as rtcReqRet;
+		const guessed_eachother = Array.from(guessed_each)
+		return { unresolved, guessed, unresolved_retry, guessed_retry, guessed_eachother };
 	}
 
 	// 序号<=sn,与sn的差值越小，排名越前，
-	private sort_guess_client(sn: number, clients: Array<peerItem>, gap = 1e9): Array<peerItem> {
+	// 此前已经判断过blocks中，定没有sn,此算法目的在于猜测出哪个peer最可能将要下载下来，gap指定相差超过这个值则放弃这个peer
+	private sort_guess_client(sn: number, clients: Array<peerItem>, gap = 30): Array<peerItem> {
 		const c_arr: Array<peerItem> = [];
 		const n_obj: objectStrMap<number> = {};
 		for (const peer of clients) {
@@ -299,7 +357,7 @@ export default class extends event {
 				}
 			}
 			if (num < gap) {
-				// 才有几率可能持有，如果n都是大于sn的，基本后续也不会持有
+				// 说明上个for里,num值已被修改,才有几率可能持有，如果n都是大于sn的，基本后续也不会持有
 				n_obj[peer.peer.id] = num;
 				c_arr.push(peer)
 			}
@@ -307,9 +365,8 @@ export default class extends event {
 		return c_arr.sort((a, b) => n_obj[a.peer.id] - n_obj[b.peer.id])
 	}
 
-	private init() {
-		this.$ws
-			.listen('offer', (data: any) => this.onOffer(data.from, data.data))
+	private init(ws: ws) {
+		ws.listen('offer', (data: any) => this.onOffer(data.from, data.data))
 			.listen("answer", (data: any) => this.onAnswer(data.from, data.data))
 			.listen("candidate", (data: any) => this.onCandidate(data.from, data.data))
 			.listen('online', (data: any) => {
@@ -321,7 +378,7 @@ export default class extends event {
 			.listen('open', () => {
 				if (this.hostIds.size && !eqSet(this.hostIds, this.wsIds)) {
 					// 无论是断线重连还是首次，都可以发送
-					this.$ws.sendJson({ event: 'join', ids: [...this.hostIds] })
+					ws.sendJson({ event: 'join', ids: [...this.hostIds] })
 					this.wsIds = new Set(this.hostIds)
 				}
 			}).listen('close', () => {
@@ -334,7 +391,7 @@ export default class extends event {
 	// 如果没有发送过join,则发送join swarm消息
 	private join(id: string) {
 		this.hostIds.add(id)
-		if (!eqSet(this.hostIds, this.wsIds)) {
+		if (!eqSet(this.hostIds, this.wsIds) && this.$ws) {
 			this.$ws.sendJson({ event: 'join', ids: [...this.hostIds] })
 			this.wsIds = new Set(this.hostIds)
 		}
@@ -344,12 +401,21 @@ export default class extends event {
 		return streams.keys()
 	}
 
+	// 本端uid
+	get id(): string {
+		return this.me
+	}
+
 	getStats(): objectStrMap<peerStat> {
 		const now = Date.now();
 		const stat: objectStrMap<peerStat> = {};
+		const ttl = streams.size > 60 ? 30e3 : 60e3; // 浏览器限制RTCPeerConnection最多大概允许300+，Failed to construct 'RTCPeerConnection': Cannot create so many PeerConnections
 		streams.forEach(item => {
 			const s = item.stat()
-			if (s.activetime && now - s.activetime > 3600e3 && s.state !== 'open') {
+			const old = (now - s.createtime > ttl) && (now - (s.activetime || s.createtime) > ttl) && ((s.state && s.state !== 'open') || (s.cstate && s.cstate !== 'connected'));
+			const pp = s.responseParts / (s.resolveParts || 1); // 回复率
+			const bad = (s.speed <= 0 && s.packet > 5) || (s.speed > 0 && s.speed < 60) || (pp > 0 && pp < 0.5);
+			if (old || (streams.size > 60 && bad) || (streams.size > 100 && s.relay)) {
 				item.destroy();
 				streams.delete(item.id)
 			} else {
@@ -359,69 +425,55 @@ export default class extends event {
 		return stat;
 	}
 
-	private newPeer(uid: string, passive: boolean) {
-		const s = new peer(uid, this.opts, (type: string, data: Object) => this.trigger(type, data));
-		streams.set(uid, s)
-		passive ? s.waitForConnect() : s.checkConn()
+	// 彻底销毁:停止轮询,销毁所有peer,关闭信令连接
+	destroy() {
+		this.enable = false
+		this.$ws = null
+		closeSignal()
+		streams.forEach(item => item.destroy())
+		streams.clear()
+		this.resolving.clear()
+		this.disabledPeers.clear()
 	}
 
-	private waitIds(ids: Set<string>) {
-		ids.forEach(id => {
-			if (id == this.me) {
-				return
-			}
-			if (streams.has(id)) {
-				// 是我断线重连,无论这些ID中,之前有我主动链接他的,也有他主动链接我的
-				// 我重新上线后,都变成他们主动链接我
-				const s = streams.get(id)
-				s.waitForConnect()
-			} else {
-				// 是我首次上线,我需要等待这些id链接我
-				this.newPeer(id, true);
-			}
-		})
-	}
-
-	private toConnect(id: string) {
-		if (streams.has(id)) {
-			// 如果对方是断线重连,无论之前是他早于我上线(他链接的我),还是我早于他上线(我链接的他)
-			// 再次上线后,都变成我主动链接他
-			const s = streams.get(id)
-			s.checkConn()
-		} else {
-			// 如果对方是首次上线,我方应该主动
-			this.newPeer(id, false)
+	// 如果没有则新建
+	private getPeer(uid: string): peer {
+		let s = streams.get(uid);
+		if (!s) {
+			s = new peer(uid, this.opts, (type: string, data: Object) => this.trigger(type, data));
+			streams.set(uid, s)
 		}
+		return s
 	}
 
-	// 我方上线消息被对方察觉,然后主动链接我方,向我发来了offer
+	// 我ws上线后，收到有有这么多用户已在线，他们若是收到我的online消息会主动connect我
+	private waitIds(ids: Set<string>) {
+		log_log("peers", ids)
+	}
+
+	// 这个id online了，我们需要主动链接他
+	private toConnect(id: string) {
+		// 如果对方是断线重连,无论之前是他早于我上线(他链接的我),还是我早于他上线(我链接的他)
+		// 再次上线后,都变成我主动链接他
+		this.getPeer(id).checkConn()
+	}
+
+	// 我方上线消息被对方察觉,然后主动链接我方,向我发来了offer，此时getPeer可能是新建了属于正常
 	// 我方应 setRemoteDescription,createAnswer,setLocalDescription,ws.send
 	private async onOffer(from: string, sdp: RTCSessionDescription) {
-		const s = streams.get(from)
-		if (!s) {
-			console.error("onOffer peer not found error")
-			return
-		}
-		s.onOffer(sdp)
+		this.getPeer(from).onOffer(sdp)
 	}
 
 	// 我发送的offer对方给了回应,我马上就可以链接他了
+	// 此时getPeer必选不能是新创建了一个，而是之前已创建了并且向对方发送了offer的（设置过setLocalDescription）
 	private async onAnswer(from: string, sdp: RTCSessionDescription) {
-		const s = streams.get(from)
-		if (!s) {
-			console.error("onAnswer peer not found error")
-			return
-		}
-		s.onAnswer(sdp)
+		this.getPeer(from).onAnswer(sdp)
 	}
 
+	// 无论是我方主动connect，还是收到offer,回复answer,后续都是双方交换candidate
+	// 此时的getPeer必然不能是新创建了一个，而是发送过offer,或者收到过offer的那个
 	private async onCandidate(from: string, candidate: RTCIceCandidate) {
-		const s = streams.get(from)
-		if (!s) {
-			console.error("onCandidate peer not found error")
-			return
-		}
-		s.onCandidate(candidate)
+		this.getPeer(from).onCandidate(candidate)
 	}
 
 

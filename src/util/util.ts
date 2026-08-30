@@ -1,5 +1,5 @@
 
-let uid = '';
+let uid: string | null = '';
 
 export const uuid = () => {
     if (uid) {
@@ -17,7 +17,7 @@ export const uuid = () => {
 }
 
 
-const logevel = sessionStorage.getItem('loglevel')
+const logevel = sessionStorage.getItem('loglevel') || ''
 
 export const log_warn = ['warn', 'info', 'log'].includes(logevel) ? console.warn.bind(console) : () => { }
 export const log_info = ['info', 'log'].includes(logevel) ? console.info.bind(console) : () => { }
@@ -25,10 +25,10 @@ export const log_log = ['log'].includes(logevel) ? console.log.bind(console) : (
 
 
 
-export const ab2str = (buf: ArrayBuffer): string => {
-    return String.fromCharCode.apply(null, new Uint8Array(buf));
-}
-
+export const ab2str = (buf: ArrayBuffer, encoding: string = 'utf-8'): string => {
+    const decoder = new TextDecoder(encoding);
+    return decoder.decode(buf);
+};
 
 export const sleep = async (ms: number) => {
     return new Promise(resolve => {
@@ -38,24 +38,20 @@ export const sleep = async (ms: number) => {
 
 
 export const str2ab = (str: string): ArrayBuffer => {
-    const buf = new ArrayBuffer(str.length);
-    const bufView = new Uint8Array(buf);
-    for (let i = 0, strLen = str.length; i < strLen; i++) {
-        bufView[i] = str.charCodeAt(i);
-    }
-    return buf;
-}
+    const encoder = new TextEncoder();
+    const uint8Array = encoder.encode(str);
+    return uint8Array.buffer;
+};
 
-export const concatArrayBuffers = (buffer1: ArrayBuffer, buffer2: ArrayBuffer): ArrayBuffer => {
-    if (!buffer1) {
-        return buffer2;
-    } else if (!buffer2) {
-        return buffer1;
+export const concatArrayBuffers = (buffers: Array<ArrayBuffer>): ArrayBuffer => {
+    const l = buffers.reduce((prev, curr) => prev + curr.byteLength, 0);
+    const buf = new Uint8Array(l);
+    let offset = 0;
+    for (const item of buffers) {
+        buf.set(new Uint8Array(item), offset);
+        offset += item.byteLength;
     }
-    const tmp = new Uint8Array(buffer1.byteLength + buffer2.byteLength);
-    tmp.set(new Uint8Array(buffer1), 0);
-    tmp.set(new Uint8Array(buffer2), buffer1.byteLength);
-    return tmp.buffer;
+    return buf.buffer;
 };
 
 
@@ -70,6 +66,40 @@ export const emit = (...args: any) => {
     const w = window as any;
     if (w.__hls_p2p_stat && Array.isArray(w.__hls_p2p_stat)) {
         (w.__hls_p2p_stat as Array<any>).forEach((item) => item.$emit(...args))
+    }
+}
+
+// 串行异步任务队列,buffer写入使用
+export class asyncQueue {
+
+    private tasks: Array<Function>;
+    private runing: boolean;
+    constructor(tasks: Array<Function>) {
+        this.tasks = tasks;
+        this.run();
+    }
+    push(task: Function) {
+        this.tasks.push(task);
+        this.run();
+    }
+    clear() {
+        this.tasks = [];
+    }
+    async run() {
+        if (this.runing) {
+            return;
+        }
+        this.runing = true;
+        let item: any;
+        while ((item = this.tasks.shift())) {
+            try {
+                await item();
+            } catch (e) {
+                // ignore error
+                console.error(e)
+            }
+        }
+        this.runing = false;
     }
 }
 

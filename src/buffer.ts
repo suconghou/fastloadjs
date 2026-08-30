@@ -1,5 +1,5 @@
-import { sleep, asyncQueue } from './utils/util'
-import event from './utils/event';
+import { sleep, asyncQueue } from './util/util'
+import event from './util/event';
 // 共计抛出事件  pause / error
 // error 被顶级处理， pause 被所属fastloader处理
 export default class extends event {

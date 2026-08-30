@@ -7,7 +7,12 @@ export default class event {
 			return;
 		}
 		for (let fn of fns) {
-			fn.apply(null, args);
+			try {
+				fn.apply(null, args);
+			} catch (e) {
+				// 单个监听器异常不应中断其他监听器
+				console.error(e)
+			}
 		}
 	}
 

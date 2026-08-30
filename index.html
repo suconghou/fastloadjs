@@ -42,9 +42,9 @@
         var config = {
             req: "http://share.suconghou.cn/video/TQ2Ytc3g1Pw/160.mp4",
             thread: 2,
-            thunk: 81920,
-            start: 0,
-            end: 1670400
+            wsize: 12,
+            // 配置 tracker 后启用P2P,如 "wss://your.tracker/ws",留空则纯HTTP下载
+            tracker: ""
         }
         var loader = new fastloadjs(config);
         loader.listen("error", console.error)

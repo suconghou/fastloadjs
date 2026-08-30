@@ -2,9 +2,9 @@
 
 const base62Map = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-// fnv1a 64 to base62
+// fnv1a 32 to base62
 export default (str: string) => {
-    return base62(Number(fnv1a64(str)));
+    return base62(fnv1a32(str));
 }
 
 export const base62 = (num: number): string => {
@@ -20,14 +20,14 @@ export const base62 = (num: number): string => {
     return arr.join('')
 }
 
-export const fnv1a64 = (str: string): bigint => {
-    let hash = 14_695_981_039_346_656_037n;
-    const fnvPrime = 1_099_511_628_211n;
+
+export const fnv1a32 = (str: string): number => {
+    let hash = 2_166_136_261;
     const bytes = (new TextEncoder()).encode(str)
     for (let index = 0; index < bytes.length; index++) {
         const characterCode = bytes[index];
-        hash ^= BigInt(characterCode);
-        hash = BigInt.asUintN(64, hash * fnvPrime);
+        hash = (hash ^ characterCode) >>> 0; // 每一步的结果都要转化为 uint32
+        hash = (hash + (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)) >>> 0; // 使用加法而不是乘法才没问题
     }
     return hash;
 }

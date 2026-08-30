@@ -1,9 +1,9 @@
-import { sleep } from './lib/utils/util'
-import bufferController from './lib/buffer'
-import fastload from "./lib/fastload";
-import dispatcher from './lib/dispatcher'
-import { streamItem, taskItem } from './lib/types';
-import tasks from './lib/tasks/index';
+import { sleep } from './util/util'
+import bufferController from './buffer'
+import fastload from "./fastload";
+import dispatcher from './dispatcher'
+import taskWrapper from './tasks/index';
+import { streamItem, taskItem } from './types';
 export default class extends fastload {
 
     private loaders: Array<fastload> = [];
@@ -11,6 +11,9 @@ export default class extends fastload {
     private mediaSource: MediaSource;
 
     private video: HTMLMediaElement
+
+    // attach时登记的清理函数,destroy时统一执行
+    private detachFns: Array<Function> = [];
 
     private async get(req: string, id: string, start: number, end: number, mirrors: Array<string>): Promise<ArrayBuffer> {
         const item: taskItem = {
@@ -20,7 +23,7 @@ export default class extends fastload {
             begin: 0, // not used in tasks.wrap
         }
         const retry = 10
-        const res = await tasks.wrap(item, id, retry, req, mirrors)()
+        const res = await taskWrapper.wrap(item, id, retry, req, mirrors)()
         if (res.err) {
             throw res.err
         }
@@ -95,6 +98,14 @@ export default class extends fastload {
         this.timeUpdate = this.timeUpdate.bind(this)
         video.addEventListener('timeupdate', this.timeUpdate)
         video.addEventListener('progress', this.timeUpdate)
+        this.detachFns.push(() => {
+            mediaSource.removeEventListener('sourceopen', sourceOpen)
+            mediaSource.removeEventListener('sourceclosed', sourceClosed)
+            mediaSource.removeEventListener('sourceended', sourceEnded)
+        }, () => {
+            video.removeEventListener('timeupdate', this.timeUpdate)
+            video.removeEventListener('progress', this.timeUpdate)
+        })
     }
 
     private timeUpdate() {
@@ -134,26 +145,41 @@ export default class extends fastload {
     }
 
     public async destroy() {
-        this.video.removeEventListener('timeupdate', this.timeUpdate)
-        this.video.removeEventListener('progress', this.timeUpdate)
-        window.URL.revokeObjectURL(this.video.src);
+        this.pause()
+        for (let fn of this.detachFns) {
+            fn()
+        }
+        this.detachFns = []
         this.loaders.forEach(item => item.destroy())
         this.loaders = []
-        let i = 0;
-        while (i++ < 5) {
-            if (this.mediaSource.readyState === 'open') {
-                const a = []
-                for (let item of this.mediaSource.activeSourceBuffers) {
-                    a.push(item.updating)
-                }
-                if (a.every(v => !v)) {
-                    return this.mediaSource.endOfStream()
-                } else {
-                    await sleep(20);
-                }
-            }
+        if (this.video && this.video.src) {
+            window.URL.revokeObjectURL(this.video.src);
         }
+        const ms = this.mediaSource
         this.mediaSource = null
+        if (!ms) {
+            return
+        }
+        // 等待sourceBuffer写入结束再endOfStream,最多约2.5s,避免静默失败
+        let i = 0;
+        while (i++ < 50) {
+            if (ms.readyState !== 'open') {
+                return
+            }
+            const updating = [];
+            for (let item of ms.activeSourceBuffers) {
+                updating.push(item.updating)
+            }
+            if (updating.every(v => !v)) {
+                try {
+                    ms.endOfStream()
+                } catch (e) {
+                    console.error(e)
+                }
+                return
+            }
+            await sleep(50);
+        }
     }
 
     public seekTo(time: number) {

@@ -7,7 +7,7 @@ export default class bufferCenter {
 
     private readonly ttls: Map<string, Map<number, number>> = new Map();
 
-    constructor(private readonly maxItmes: number = 500, private readonly maxTtl = 600) {
+    constructor(private readonly maxItmes: number = 2000, private readonly maxTtl = 600) {
         setInterval(() => this.expire(), 60e3)
     }
 
@@ -20,18 +20,19 @@ export default class bufferCenter {
         return infos;
     }
 
-    part(id: string): Map<number, bufferItem> {
+    part(id: string): Map<number, bufferItem> | undefined {
         if (this.buffers.has(id)) {
             return this.buffers.get(id)
         }
     }
 
-    get(id: string, part: number,): bufferItem {
-        if (this.buffers.has(id)) {
-            const s = this.buffers.get(id)
-            if (s.has(part)) {
+    get(id: string, part: number,): bufferItem | undefined {
+        const s = this.buffers.get(id)
+        if (s) {
+            const buf = s.get(part)
+            if (buf) {
                 this.ttl(id, part)
-                return s.get(part)
+                return buf
             }
         }
     }
@@ -39,19 +40,20 @@ export default class bufferCenter {
     put(buf: bufferItem) {
         const { id, part } = buf;
         this.ttl(id, part)
-        if (this.buffers.has(id)) {
-            const urlBuf = this.buffers.get(id)
+        const urlBuf = this.buffers.get(id)
+        if (urlBuf) {
             urlBuf.set(part, buf)
         } else {
-            const urlBuf: Map<number, bufferItem> = new Map();
-            urlBuf.set(part, buf);
-            this.buffers.set(id, urlBuf)
+            const uBuf: Map<number, bufferItem> = new Map();
+            uBuf.set(part, buf);
+            this.buffers.set(id, uBuf)
         }
     }
 
     private ttl(id: string, part: number) {
-        if (this.ttls.has(id)) {
-            this.ttls.get(id).set(part, Date.now())
+        const tt = this.ttls.get(id)
+        if (tt) {
+            tt.set(part, Date.now())
         } else {
             const t: Map<number, number> = new Map()
             t.set(part, Date.now())
@@ -60,26 +62,44 @@ export default class bufferCenter {
     }
 
     private expire() {
-        let num: number = 0;
-        for (const [_, file] of this.buffers) {
-            num += file.size
-        }
-        if (num <= this.maxItmes) {
-            return
-        }
         const t = Date.now();
+        // 1. 按TTL过期:超过maxTtl未被访问的条目直接删除
         for (const [id, s] of this.ttls) {
             for (const [part, time] of s) {
                 if (t - time > this.maxTtl) {
                     s.delete(part)
-                    if (this.buffers.has(id)) {
-                        this.buffers.get(id).delete(part)
-                        if (num-- < this.maxItmes) {
-                            break
-                        }
-                    }
+                    this.buffers.get(id)?.delete(part)
                 }
             }
+            if (!s.size) {
+                this.buffers.delete(id)
+                this.ttls.delete(id)
+            }
+        }
+        // 2. 容量兜底:活跃分片不断被访问导致TTL不过期时,按最近访问时间从旧到新淘汰,保证总量不超过maxItmes
+        let total: number = 0;
+        for (const file of this.buffers.values()) {
+            total += file.size
+        }
+        if (total <= this.maxItmes) {
+            return
+        }
+        const all: Array<{ id: string, part: number, time: number }> = [];
+        for (const [id, s] of this.ttls) {
+            for (const [part, time] of s) {
+                all.push({ id, part, time })
+            }
+        }
+        all.sort((a, b) => a.time - b.time)
+        for (const it of all) {
+            if (total <= this.maxItmes) {
+                break
+            }
+            this.ttls.get(it.id)?.delete(it.part)
+            this.buffers.get(it.id)?.delete(it.part)
+            total--
+        }
+        for (const [id, s] of this.ttls) {
             if (!s.size) {
                 this.buffers.delete(id)
                 this.ttls.delete(id)

@@ -5,8 +5,7 @@ import { rtcRecv } from '../../types';
 
 let $ws: ws;
 
-export default (addr: string): ws => {
-    if (!$ws) {
+export default (addr: string): ws => {    if (!$ws) {
         $ws = new ws(addr + uuid())
         $ws.listen('message', (ev: MessageEvent) => {
             try {
@@ -24,6 +23,14 @@ export default (addr: string): ws => {
         })
     }
     return $ws
+}
+
+// 关闭全局共享的信令ws连接(整个实例销毁时调用)
+export const closeSignal = () => {
+    if ($ws) {
+        $ws.destroy()
+        $ws = (null as unknown as ws)
+    }
 }
 
 // 协议打包，解包
@@ -49,7 +56,7 @@ export const decode = (data: ArrayBuffer): rtcRecv => {
     const l = x[3]
     const meta = x.slice(4, 4 + l)
     const body = data.slice(4 + l)
-    const metaStr = String.fromCharCode.apply(null, meta);
+    const metaStr = String.fromCharCode(...meta);
     const [id, sn, i, n] = JSON.parse(metaStr)
     const ret: rtcRecv = {
         id,
@@ -66,8 +73,7 @@ export const decode = (data: ArrayBuffer): rtcRecv => {
 export const encode = (data: ArrayBuffer, id: string, sn: number, i: number, n: number): ArrayBuffer => {
     const str = JSON.stringify([id, sn, i, n]);
     const x = new Uint8Array([protocol[0], protocol[1], version, str.length]);
-    const header = concatArrayBuffers(x.buffer, str2ab(str))
-    return concatArrayBuffers(header, data);
+    return concatArrayBuffers([x.buffer, str2ab(str), data]);
 }
 
 
@@ -82,11 +88,21 @@ export const isServer = (uid: string) => {
 }
 
 
-export const candidateInfo = (str: string): RTCIceCandidate => {
-    const r = /:(?<foundation>\d+)\s+\d\s+(?<protocol>[a-zA-Z]{3})\s+(?<priority>\d+)\s+(?<address>[\w\-\.]+)\s+(?<port>\d+)\s+typ\s+(?<type>[a-z]+)(?:\s+raddr\s+(?<relatedAddress>[\w\-\.]+)\s+rport\s+(?<relatedPort>\d+)(?:.+ufrag\s+(?<usernameFragment>\w+))?)?/;
+export const candidateInfo = (str: string): RTCIceCandidate | null => {
+    const r = /:(\d+)\s+\d\s+([a-zA-Z]{3})\s+(\d+)\s+([\w\-\.:]+)\s+(\d+)\s+typ\s+([a-z]+)(?:\s+raddr\s+([\w\-\.:]+)\s+rport\s+(\d+)(?:.+ufrag\s+(\w+))?)?/;
     const match = str.match(r);
     if (match) {
-        return match.groups as unknown as RTCIceCandidate;
+        return {
+            foundation: match[1],
+            protocol: match[2],
+            priority: match[3],
+            address: match[4],
+            port: match[5],
+            type: match[6],
+            relatedAddress: match[7],
+            relatedPort: match[8],
+            usernameFragment: match[9]
+        } as unknown as RTCIceCandidate;
     }
     return null
 }

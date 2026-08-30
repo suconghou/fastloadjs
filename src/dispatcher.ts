@@ -1,6 +1,6 @@
 import parser from './mediaparse/index'
 
-import { taskItem, objectMap } from './lib/types'
+import { taskItem, objectMap } from './types'
 
 // 我们的n字段(结束位)统一最大为文件大小,实际请求时按照end-1去请求.最后正好取到末尾
 // m的开始值是 indexEndoffset+1, n的结束值是文件大小

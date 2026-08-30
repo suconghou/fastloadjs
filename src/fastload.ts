@@ -1,17 +1,20 @@
-import { fastConfig, partResponse, taskItem, fetchTask, objectMap } from "./types";
+import { fastConfig, partResponse, taskItem, fetchTask, objectMap, rtcBufferItem, rtcProgressInfo } from "./types";
 import bufferController from './buffer'
 import workers from "./workers/index";
 import tasks from "./tasks/index";
 import dispatcher from './dispatcher'
-import { sleep } from './utils/util'
-import event from "./utils/event";
-import libwebrtc from '../webrtc/index'
-import { globalBuffer } from "./utils/bufferCenter";
+import { sleep } from './util/util'
+import event from "./util/event";
+import libwebrtc from './lib/webrtc/index'
+import { globalBuffer } from "./util/bufferCenter";
 
 
 export default class fastload extends event {
 
-	private static rtcInstance: libwebrtc;
+	private static rtcInstance: libwebrtc | null = null;
+
+	// 共享rtc实例的引用计数,最后一个loader销毁时才真正销毁rtc
+	private static rtcCount = 0;
 
 	protected config: fastConfig;
 
@@ -34,6 +37,8 @@ export default class fastload extends event {
 
 	private rtcEvcancel: Function = () => { }
 
+	private rtcLoop: any = 0;
+
 	private rtcFound: number = 0;
 
 	private bufferHealth: number = 0;
@@ -49,6 +54,7 @@ export default class fastload extends event {
 		this.config = { ...this.defaultOpts, ...opts }
 		if (this.P2P) {
 			this.rtc()
+			fastload.rtcCount++
 		}
 	}
 
@@ -252,10 +258,12 @@ export default class fastload extends event {
 
 	private rtcInit() {
 		const rtc = this.rtc()
-		const query = (parts: Array<number>) => { rtc.query(this.config.meta, parts,) }
+		const query = (parts: Array<number>) => {
+			rtc.req(this.config.meta, parts.map(no => ({ sn: no })))
+		}
 		const hasAlivePeer = (stat: any): Boolean => {
 			for (let key in stat) {
-				if (stat[key] && stat[key].state == 'open') {
+				if (stat[key] && stat[key].state == 'open' && stat[key].cstate == 'connected') {
 					return true
 				}
 			}
@@ -327,46 +335,49 @@ export default class fastload extends event {
 			}
 			query(parts)
 		}
+		// 启动p2p探测轮询,此前task从未被调度,导致p2p从不工作
+		this.rtcLoop = setTimeout(task, 1e3)
 		this.rtcEvcancel = this.rtcEventInit()
 	}
 
 	private rtcEventInit(): Function {
 		const rtc = this.rtc()
 		const events: Array<Function> = [];
-		const bufferProgress = ({ id, i, n, uid }) => {
-			// 传输进行中,此处的id是 meta|part 的形式
+		const bufferProgress = (e: rtcProgressInfo) => {
+			// 传输进行中,e.data是rtcRecv,其id即swarmId(meta)
 			if (!this.bufferCtrl) {
 				return
 			}
-			const [meta, part] = id.split('|')
-			if (this.config.meta != meta) {
+			const info = e.data
+			if (this.config.meta != info.id) {
 				// rtc实例是共享的,非本loader的数据忽略
 				return;
 			}
 			this.rtcFound++;
-			this.trigger('rtc.progress', { i, n, meta, part, })
+			this.trigger('rtc.progress', { i: info.i, n: info.n, meta: info.id, part: info.sn, })
 		}
 		rtc.listen('buffer.recv', bufferProgress)
 		events.push(() => {
 			rtc.remove('buffer.recv', bufferProgress)
 		})
-		const data = ({ id, buffer }) => {
-			// 此处的ID是rtc中传输的ID，是 meta|part 的形式
+		const data = (e: rtcBufferItem) => {
+			// e.data是bufferItem,id为meta,part为分块序号
 			if (!this.bufferCtrl) {
 				return
 			}
-			const [meta, part] = id.split('|')
-			if (this.config.meta != meta) {
+			const partItem = e.data
+			if (this.config.meta != partItem.id) {
 				return;
 			}
+			const part = partItem.part
 			const item: partResponse = {
 				no: part,
-				data: buffer,
+				data: partItem.buffer,
 				err: null,
 			}
 			this.trigger('rtc.done', item)
 			if (!this.bufferInuse.has(part)) {
-				this.bufferCtrl.push(buffer)
+				this.bufferCtrl.push(partItem.buffer)
 				this.bufferInuse.add(part)
 			}
 			delete this.httpPendings[part]
@@ -402,14 +413,22 @@ export default class fastload extends event {
 
 	private rtcReset() {
 		this.rtcEvcancel()
-		if (fastload.rtcInstance) {
-			fastload.rtcInstance.clear()
+		if (this.rtcLoop) {
+			clearTimeout(this.rtcLoop)
+			this.rtcLoop = 0
+		}
+		fastload.rtcCount--
+		if (fastload.rtcCount <= 0 && fastload.rtcInstance) {
+			// 最后一个loader销毁,才真正关闭信令与所有peer
+			fastload.rtcInstance.destroy()
+			fastload.rtcInstance = null
+			fastload.rtcCount = 0
 		}
 	}
 
 	private rtc(): libwebrtc {
 		if (!fastload.rtcInstance) {
-			fastload.rtcInstance = new libwebrtc(this.opts)
+			fastload.rtcInstance = new libwebrtc({ tracker: this.opts.tracker, rtcConf: this.opts.rtcConf })
 		}
 		return fastload.rtcInstance
 	}

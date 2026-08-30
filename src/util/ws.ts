@@ -1,11 +1,16 @@
 
 import event from './event';
 
+// 离线消息队列上限与时效
+const maxQueue = 500;
+const queueTtl = 60e3;
+
 export default class extends event {
     private $ws: WebSocket | null = null;
-    private tasks: Array<string> = [];
+    private tasks: Array<{ t: number, str: string }> = [];
     private runing: Boolean = false;
     private timer: any;
+    private delay: number = 2e3;
 
     constructor(private addr: string) {
         super();
@@ -32,6 +37,8 @@ export default class extends event {
         this.$ws.binaryType = 'arraybuffer';
         this.$ws.onopen = (ev: Event) => {
             this.trigger('open', ev);
+            // 连接成功,重置退避间隔
+            this.delay = 2e3;
             this.stopconnect();
             this.notify();
         };
@@ -51,17 +58,24 @@ export default class extends event {
     }
 
     private startconnect() {
-        clearInterval(this.timer);
+        if (this.timer) {
+            // 已有重连定时器在跑,避免每次sendJson都重置间隔导致退避混乱
+            return;
+        }
+        // 指数退避:2s起步,每次翻倍,30s封顶,连接成功后重置
+        const d = this.delay;
+        this.delay = Math.min(30e3, this.delay * 2);
         this.timer = setInterval(() => {
             if (navigator.onLine === false) {
                 return;
             }
             this.connect();
-        }, 2000);
+        }, d);
     }
 
     private stopconnect() {
         clearInterval(this.timer);
+        this.timer = null;
     }
 
     private notify() {
@@ -70,9 +84,14 @@ export default class extends event {
         }
         this.runing = true;
         if (this.$ws && this.$ws.readyState == this.$ws.OPEN) {
-            let item: any;
+            const now = Date.now();
+            let item: { t: number, str: string } | undefined;
             while ((item = this.tasks.shift())) {
-                this.$ws.send(item);
+                if (now - item.t > queueTtl) {
+                    // 离线期间积压的旧信令(offer/answer/candidate)已失效,丢弃,避免重连后引发对端wrong state
+                    continue;
+                }
+                this.$ws.send(item.str);
             }
         } else {
             this.startconnect();
@@ -82,7 +101,7 @@ export default class extends event {
 
     // raw ws send
     public send(data: string | ArrayBufferLike | Blob | ArrayBufferView): this {
-        this.$ws.send(data)
+        this.$ws && this.$ws.send(data as string | Blob | BufferSource)
         return this;
     }
 
@@ -90,7 +109,11 @@ export default class extends event {
         try {
             const str = JSON.stringify(data);
             if (str) {
-                this.tasks.push(str);
+                // 限制离线队列长度,超出时丢弃最旧的
+                while (this.tasks.length >= maxQueue) {
+                    this.tasks.shift()
+                }
+                this.tasks.push({ t: Date.now(), str });
                 this.notify();
             }
         } catch (e) {
