@@ -1,4 +1,4 @@
-export default class {
+export default class event {
 	protected clientList: Map<string, ((...args: any) => void)[]> = new Map();
 
 	public trigger(ev: string, ...args: any) {

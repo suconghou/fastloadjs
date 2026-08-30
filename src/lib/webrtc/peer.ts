@@ -1,10 +1,11 @@
-import { bufferItem, fastConfig, hostsMap, peerStat, resolveTask, rtcRecv } from '../lib/types';
-import { globalBuffer } from '../lib/utils/bufferCenter';
-import { log_info, log_log, log_warn } from '../lib/utils/util';
-import { uuid, decode, concatArrayBuffers, singal, encode, isServer } from './util/util'
-import ws from './util/ws';
+import { concatArrayBuffers, log_log, uuid, log_warn, sleep, emit } from '../../util/util'
+import singal, { candidateInfo, decode, encode, isServer } from './util'
+import { globalBuffer } from "../../util/bufferCenter";
+import { bufferItem, config, fragment, hostsMap, peerStat, resolveTask, rtcBufferItem, rtcProgressInfo, rtcRecv } from '../../types';
+import ws from '../../util/ws';
 
 const rtcMax = 60 * 1024
+let localAddress: string;
 
 export default class {
 
@@ -15,13 +16,19 @@ export default class {
     private restart: number = 0
     private activetime: number = 0;
     private isServer: boolean;
-    private speed: number = 0; // 链接速度
+    private speed: number = 0; // 链接速度,如果接收超过2MB,仍没有算出速度，很可能是丢包严重
+    private localAddress: string;
+    private localPort: number;
+    private remoteAddress: string;
+    private remotePort: number;
 
+    private relay: boolean = false;
+    private relatedAddress: string;
+    private relatedPort: number;
 
 
     // 缓存分包的rtc数据，收到完整的一个包后清理缓存
     private buffers: Map<string, Array<rtcRecv>> = new Map()
-
 
     // 对端图解
     private hosts: hostsMap = {}
@@ -34,16 +41,25 @@ export default class {
     // 我们的请求任务，如果发现我们已经有了，也自动发送quit
     private queryTasks: Array<resolveTask> = [];
 
+    // buffer发送队列
+    private bufferQueue: Array<bufferItem> = [];
+    private queuerunning = false
+
+    // 半包的数量，越大丢包越严重
+    private packet: number;
+
     private $ws: ws;
     private me = uuid();
 
+
     // trigger open/close/error/message
-    constructor(public readonly id: string, private readonly opts: fastConfig, private readonly trigger: (type: string, data: Object) => void) {
+    constructor(public readonly id: string, private readonly opts: config, private readonly trigger: (type: string, data: Object) => void) {
         this.isServer = isServer(id)
         this.$ws = singal(opts.tracker)
         this.init()
-        this.resolveTaskTimer = setInterval(() => this.doTask(), 2e3);
+        this.resolveTaskTimer = setInterval(() => this.doTask(), 600);
     }
+
 
     public destroy() {
         clearInterval(this.resolveTaskTimer);
@@ -70,7 +86,6 @@ export default class {
                 await this.c.setLocalDescription(offer)
                 // send sdp to ws server
                 this.$ws.sendJson({ event: 'offer', to: this.id, from: this.me, data: offer })
-                log_log(offer)
             } catch (e) {
                 log_warn(e)
             }
@@ -107,8 +122,26 @@ export default class {
         }
 
         this.c.onicecandidate = (ev) => {
-            log_log(ev)
             if (ev.candidate) {
+                if (ev.candidate.type == 'host') {
+                    // 本机
+                    this.localAddress = ev.candidate.address
+                    this.localPort = ev.candidate.port
+                }
+                if (ev.candidate.type == "srflx") {
+                    // The STUN server is reachable!
+                    localAddress = ev.candidate.address;
+                    this.localAddress = localAddress
+                    this.localPort = ev.candidate.port;
+                }
+
+                // If a relay candidate was found, notify that the TURN server works!
+                // 仅代表中继服务器可用，并不一定最终使用了中继
+                if (ev.candidate.type == "relay") {
+                    this.relatedAddress = ev.candidate.address;
+                    this.relatedPort = ev.candidate.port;
+                }
+
                 const data = {
                     event: 'candidate',
                     from: this.me,
@@ -116,7 +149,6 @@ export default class {
                     data: ev.candidate
                 }
                 this.$ws.sendJson(data)
-                log_log("send candidate", data)
             }
         }
     }
@@ -124,7 +156,7 @@ export default class {
     public waitForConnect() {
     }
 
-    // 1. 对于对方索要的我们检查，如果发现了，发送给对方
+    // 1. 对于发送任务更新地方 1.收到quit消息 2.发现已超时 3. 队列已调用发送
     // 2. 对于我们索要的，如果我们已经有了，则发送quit
     // 即使已经断线，这些数据也要正常维护
     private doTask() {
@@ -133,8 +165,8 @@ export default class {
             // 如果查找到了，则回复给他，然后清理这个任务
             const buf = globalBuffer.get(item.id, item.sn)
             if (buf && this.cansend) {
-                this.sendBuffer(buf);
-                return false
+                // 此处虽然重复调用，但是后续会自动去重
+                this.callQueue(buf);
             }
             // 如果是时间相差比较久的，自动放弃这个任务，超过60s还未解决的
             if (t - item.t > 60e3) {
@@ -168,35 +200,35 @@ export default class {
         for (const [id, parts] of q) {
             this.send(JSON.stringify({ event: 'quit', data: { id, parts: Array.from(parts) } }))
         }
+        this.packet = this.calcPacket();
     }
 
     // 我主动链接这个ID
-    async connect() {
-        log_log("i connect ", this.id)
-        const connect = () => {
-            this.init()
-            if (this.dc) {
-                try {
-                    this.dc.close()
-                } catch (e) {
-                    log_warn(e)
-                }
+    private connect() {
+        clearTimeout(this.restart)
+        this.init()
+        if (this.dc) {
+            try {
+                this.dc.close()
+            } catch (e) {
+                log_warn(e)
             }
-            this.dc = this.c.createDataChannel("dc", { maxPacketLifeTime: 2000 })
-            this.dc.binaryType = 'arraybuffer'
-            this.dc.bufferedAmountLowThreshold = rtcMax;
-            this.dcInit()
         }
+        this.dc = this.c.createDataChannel("dc", { maxPacketLifeTime: 9e3, ordered: false })
+        this.dc.binaryType = 'arraybuffer'
+        this.dc.bufferedAmountLowThreshold = rtcMax;
+        this.dcInit()
+    }
+
+    checkConn() {
         if (this.c && this.c.connectionState == 'connected' && this.cansend) {
-            log_info("connection to ", this.id, " is already open")
-            // 对方刷新时,我方执行此逻辑;这个到底是不是链接着的,我们再发送一个ping探测一下
             this.send(JSON.stringify({ event: 'ping' }))
             clearTimeout(this.restart)
             // 如果我们5秒内收到响应了（pong）,则重连任务将会取消
-            this.restart = setTimeout(() => connect(), 5e3)
-            return
+            this.restart = setTimeout(() => this.connect(), 5e3)
+        } else {
+            this.connect();
         }
-        connect();
     }
 
     private sendHosts(force = false) {
@@ -222,7 +254,7 @@ export default class {
             this.dc.close()
         })
         this.dc.onopen = (e) => {
-            log_warn("dc open me : " + this.me + " remote: " + this.id, e)
+            this.isUsedRelay();
             this.trigger('open', { id: this.id, data: e });
             this.activetime = Date.now()
             this.sendHosts(true)
@@ -278,18 +310,15 @@ export default class {
                         const parts: Array<number> = info.data.parts
                         const t = Date.now()
                         for (const sn of parts) {
-                            const item = globalBuffer.get(id, sn)
-                            if (!item) {
-                                // 当前我们没有这个buffer,我们就将它加入到任务队列，在60s内如果我们拥有了，则会发送给他，如果太久则自动放弃
-                                this.resolveTasks.push({
-                                    id,
-                                    t,
-                                    sn,
-                                })
-                                continue
-                            }
-                            this.sendBuffer(item)
+                            // 无论我们是否持有此buffer,将此请求加入到检查队列，当我们持有时会发送给他，因为有些buffer可能我们现在就已经持有，为保证及时，故立即doTask
+                            // 在60s内如果我们拥有了，则会发送给他，如果太久则自动放弃
+                            this.resolveTasks.push({
+                                id,
+                                t,
+                                sn,
+                            })
                         }
+                        this.doTask()
                     }
                     return
                 case 'quit':
@@ -303,7 +332,6 @@ export default class {
                             }
                             return true
                         })
-
                     }
                     return
             }
@@ -327,7 +355,7 @@ export default class {
             return true
         })
         // 分片传输中,可用于进度提示
-        this.trigger('buffer.recv', { data: info, id: this.id })
+        this.trigger('buffer.recv', { data: info, id: this.id } as rtcProgressInfo)
         let done = true;
         const c = this.buffers.get(bufKey)
         for (let j = 0; j < info.n; j++) {
@@ -359,10 +387,64 @@ export default class {
             }
             globalBuffer.put(partItem)
         }
-        this.trigger('buffer', { data: partItem, newly, id: this.id })
-        if (!newly) {
-            log_info('already have buffer', partItem)
+        this.trigger('buffer', { data: partItem, newly, server: this.isServer, id: this.id } as rtcBufferItem)
+        log_log("接收分片", info.sn, "来自", this.id, "速度", this.speed, "newly", newly)
+    }
+
+    // 媒体数据使用此列队发送，其他数据可以直接发送
+    private async callQueue(data: bufferItem) {
+        const has = this.bufferQueue.find(it => it.id == data.id && it.part == data.part)
+        if (!has) {
+            this.bufferQueue.push(data)
         }
+        if (this.queuerunning) {
+            return
+        }
+        const max = rtcMax * 5; // max 5MB buffer
+        let item: bufferItem;
+        try {
+            this.queuerunning = true
+            while (item = this.bufferQueue.shift()) {
+                if (!this.dc || !this.cansend) {
+                    this.bufferQueue.length = 0
+                    return
+                }
+                while (this.dc.bufferedAmount > max) {
+                    await sleep(500)
+                }
+                // 检查此任务是否已quit
+                const exist = this.resolveTasks.find(it => it.id == item.id && it.sn == item.part)
+                if (!exist) {
+                    continue
+                }
+                this.sendBuffer(item)
+                // 调用完发送后，需要清理检查队列
+                this.resolveTasks = this.resolveTasks.filter(it => !(it.id == item.id && it.sn == item.part))
+            }
+
+        } finally {
+            this.queuerunning = false
+        }
+
+    }
+
+    // 计算丢包率,一般情况下
+    private calcPacket(): number {
+        let num = 0;
+        for (const [_, c] of this.buffers) {
+            let done = true
+            const info = c.find(it => it)
+            for (let j = 0; j < info.n; j++) {
+                if (!c[j]) {
+                    done = false
+                    break
+                }
+            }
+            if (!done) {
+                num++
+            }
+        }
+        return num
     }
 
     private sendBuffer(data: bufferItem) {
@@ -371,6 +453,7 @@ export default class {
             const item = datas[i]
             this.send(item)
         }
+        emit('rtc-sent', this.id, data)
     }
 
     private splitBuffer(data: bufferItem): Array<ArrayBuffer> {
@@ -410,11 +493,8 @@ export default class {
             to: this.id,
             data: answer,
         }
-        log_log("send answer", data)
         this.$ws.sendJson(data)
     }
-
-
 
     public async onAnswer(sdp: RTCSessionDescription) {
         if (['closed'].includes(this.c.signalingState)) {
@@ -422,30 +502,56 @@ export default class {
             return
         }
         await this.c.setRemoteDescription(sdp)
-        log_info('setRemoteDescription', sdp)
         // 设置后,链接建立完毕
     }
 
     public async onCandidate(candidate: RTCIceCandidate) {
+        const info = candidateInfo(candidate.candidate)
+        if (info) {
+            if (info.type == 'host') {
+                // 本机
+                this.remoteAddress = info.address
+                this.remotePort = Number(info.port)
+            }
+            if (info.type == "srflx") {
+                // The STUN server is reachable!
+                this.remoteAddress = info.address
+                this.remotePort = Number(info.port)
+            }
+            // If a relay candidate was found, notify that the TURN server works!
+            // 仅代表中继服务器可用，并不一定最终使用了中继
+            if (info.type == "relay") {
+                this.relatedAddress = info.address
+                this.relatedPort = Number(info.port)
+            }
+        }
+
         if (['closed'].includes(this.c.signalingState)) {
             log_warn("onCandidate error signalingState is " + this.c.signalingState)
             return
         }
         this.c.addIceCandidate(candidate)
-        log_log("made connection ", this.id)
     }
 
-
-    // 发送索要请求
-    resolve(id: string, parts: Array<number>) {
-        const data = JSON.stringify({ event: 'resolve', data: { id, parts } })
-        this.send(data)
+    // 发送索要请求,上层需要判断是在线了才能调用，60秒内最好不重复发送
+    resolve(id: string, parts: Set<fragment>) {
+        let data: Array<any> = [];
+        if (this.isServer) {
+            parts.forEach(item => {
+                data.push({ part: item.sn, url: item.url })
+            })
+        } else {
+            parts.forEach(item => {
+                data.push(item.sn)
+            })
+        }
+        this.send(JSON.stringify({ event: 'resolve', data: { id, parts: data } }))
         const t = Date.now()
-        for (const sn of parts) {
+        for (const part of parts) {
             this.queryTasks.push({
                 id,
                 t,
-                sn
+                sn: part.sn
             })
         }
     }
@@ -475,6 +581,22 @@ export default class {
 
     }
 
+    // 计算最终是否使用了中继
+    async isUsedRelay() {
+        const stats: any = await this.c.getStats()
+        let selectedLocalCandidate: string
+        for (const { type, state, localCandidateId } of stats.values())
+            if (type === 'candidate-pair' && state === 'succeeded' && localCandidateId) {
+                selectedLocalCandidate = localCandidateId
+                break
+            }
+        this.relay = (selectedLocalCandidate && stats.get(selectedLocalCandidate)?.candidateType === 'relay')
+        if (this.relay) {
+            log_warn("relay found", this)
+        }
+        return this.relay;
+    }
+
     stat(): peerStat {
         return {
             tx: this.tx,
@@ -483,11 +605,21 @@ export default class {
             cstate: this.c ? this.c.connectionState : null,
             istate: this.c ? this.c.iceConnectionState : null,
             gstate: this.c ? this.c.iceGatheringState : null,
+            bufferedAmount: this.dc ? this.dc.bufferedAmount : 0,
             activetime: this.activetime,
             isServer: this.isServer,
             speed: this.speed,
             hosts: this.hosts,
+            localAddress: this.localAddress || localAddress,
+            localPort: this.localPort,
+            remoteAddress: this.remoteAddress,
+            remotePort: this.remotePort,
+            relay: this.relay,
+            relatedAddress: this.relatedAddress,
+            relatedPort: this.relatedPort,
+            packet: this.packet,
         }
     }
+
 }
 

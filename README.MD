@@ -43,3 +43,22 @@ const iceServers = {
 		},
 	]
 };
+
+共用的文件
+
+lib/fetcher 所有
+lib/webrtc 所有
+lib/providers 所有
+util 所有
+
+
+cd /Users/suconghou/data/git/hlsp2p/src && fd -I -e js -X rm
+cd /Users/suconghou/data/git/repo/fastloadjs/src && fd -I -e js -X rm
+
+cd /Users/suconghou/data/git/repo/fastloadjs/
+
+difft src/lib/fetcher ../../hlsp2p/src/lib/fetcher
+difft src/lib/webrtc ../../hlsp2p/src/lib/webrtc
+difft src/lib/providers ../../hlsp2p/src/lib/providers
+difft src/util ../../hlsp2p/src/util
+

@@ -16,14 +16,11 @@ export interface partResponse {
 }
 
 export interface fetchOpts {
-	readonly timeout: number
-	readonly readtimeout: number
+	timeout: number
+	readtimeout: number
 	cache: boolean
 }
 
-export interface requestBuilder {
-	(req: string, start: number, end: number): Request;
-}
 
 export interface fetchTask extends Function {
 	(): Promise<partResponse>

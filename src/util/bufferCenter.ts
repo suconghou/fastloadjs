@@ -7,7 +7,7 @@ export default class bufferCenter {
 
     private readonly ttls: Map<string, Map<number, number>> = new Map();
 
-    constructor(private readonly maxItmes: number = 3200, private readonly maxTtl = 600) {
+    constructor(private readonly maxItmes: number = 500, private readonly maxTtl = 600) {
         setInterval(() => this.expire(), 60e3)
     }
 
