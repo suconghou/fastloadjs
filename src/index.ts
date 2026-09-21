@@ -119,7 +119,11 @@ export default class extends fastload {
 
     // 缓冲低水位(秒):低于此值才恢复下载。过低会导致每轮窗口下完后一直等到缓冲耗尽才续期,
     // 网络抖动时直接卡顿;过高则浪费带宽。一轮窗口约 wsize 个分片,典型 40-80 秒
-    private lowWater = 15
+    private lowWater = 60
+
+    // 卡顿期间的定时复查句柄,播放恢复后由 disarmStall 撤销
+    private stallTimer: any = null
+    private disarmStall: Function = null
 
     private timeUpdate() {
         if (this.video.buffered.length) {
@@ -152,6 +156,7 @@ export default class extends fastload {
     // 视频因缓冲不足而停顿时,立即恢复下载,避免pause状态下事件停发导致的死锁
     private onWaiting() {
         this.start()
+        this.armStallCheck()
         if (this.video.buffered.length) {
             const cur = this.video.currentTime
             for (let i = 0; i < this.video.buffered.length; i++) {
@@ -162,6 +167,26 @@ export default class extends fastload {
             }
         }
         this.setBufferHealth(0)
+    }
+
+    // 卡顿期间currentTime停滞,timeupdate/progress停发,timeUpdate里的pause分支永远走不到,
+    // 下载会一直进行到整个窗口分片下完为止。此处开启定时复查,主动执行缓冲管理,
+    // 缓冲超过低水位即暂停;一旦播放恢复(playing/seeked)立即撤销,回到纯事件驱动
+    private armStallCheck() {
+        if (this.stallTimer) {
+            return
+        }
+        const disarm = () => {
+            this.video.removeEventListener('playing', disarm)
+            this.video.removeEventListener('seeked', disarm)
+            clearInterval(this.stallTimer)
+            this.stallTimer = null
+            this.disarmStall = null
+        }
+        this.disarmStall = disarm
+        this.video.addEventListener('playing', disarm)
+        this.video.addEventListener('seeked', disarm)
+        this.stallTimer = setInterval(() => this.timeUpdate(), 1000)
     }
 
     public start() {
@@ -181,6 +206,9 @@ export default class extends fastload {
 
     public async destroy() {
         this.pause()
+        if (this.disarmStall) {
+            this.disarmStall()
+        }
         for (let fn of this.detachFns) {
             fn()
         }
