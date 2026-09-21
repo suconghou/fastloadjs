@@ -101,8 +101,11 @@ export default class extends fastload {
         this.mediaSource = mediaSource
         video.src = URL.createObjectURL(mediaSource);
         this.timeUpdate = this.timeUpdate.bind(this)
+        this.onWaiting = this.onWaiting.bind(this)
         video.addEventListener('timeupdate', this.timeUpdate)
         video.addEventListener('progress', this.timeUpdate)
+        // 缓冲耗尽时currentTime不再推进,timeupdate停发,worker若处于pause会永久卡死,此处兜底恢复
+        video.addEventListener('waiting', this.onWaiting)
         this.detachFns.push(() => {
             mediaSource.removeEventListener('sourceopen', sourceOpen)
             mediaSource.removeEventListener('sourceclosed', sourceClosed)
@@ -110,8 +113,13 @@ export default class extends fastload {
         }, () => {
             video.removeEventListener('timeupdate', this.timeUpdate)
             video.removeEventListener('progress', this.timeUpdate)
+            video.removeEventListener('waiting', this.onWaiting)
         })
     }
+
+    // 缓冲低水位(秒):低于此值才恢复下载。过低会导致每轮窗口下完后一直等到缓冲耗尽才续期,
+    // 网络抖动时直接卡顿;过高则浪费带宽。一轮窗口约 wsize 个分片,典型 40-80 秒
+    private lowWater = 15
 
     private timeUpdate() {
         if (this.video.buffered.length) {
@@ -120,9 +128,9 @@ export default class extends fastload {
                 const start = this.video.buffered.start(i)
                 const end = this.video.buffered.end(i)
                 if (cur >= start && cur <= end) {
-                    // 找到当前播放点所在的缓存端,缓存区不足300秒时,需要开启worker下载数据
+                    // 找到当前播放点所在的缓存端,缓冲不足低水位时,需要开启worker下载数据
                     const cached = end - cur
-                    if (cached > 3) {
+                    if (cached > this.lowWater) {
                         this.pause()
                     } else {
                         this.start()
@@ -139,6 +147,21 @@ export default class extends fastload {
             this.start()
             this.setBufferHealth(0)
         }
+    }
+
+    // 视频因缓冲不足而停顿时,立即恢复下载,避免pause状态下事件停发导致的死锁
+    private onWaiting() {
+        this.start()
+        if (this.video.buffered.length) {
+            const cur = this.video.currentTime
+            for (let i = 0; i < this.video.buffered.length; i++) {
+                if (cur >= this.video.buffered.start(i) && cur <= this.video.buffered.end(i)) {
+                    this.setBufferHealth(this.video.buffered.end(i) - cur)
+                    return
+                }
+            }
+        }
+        this.setBufferHealth(0)
     }
 
     public start() {
