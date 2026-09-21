@@ -69,6 +69,9 @@ export default class fastload extends event {
 			this.bufferInuse.clear()
 		})
 		this.worker = new workers(thread, retry, (res: partResponse) => this.taskDone(res))
+		// init() 会立即起线程,而 attach 在 ready 之后才调用 start();
+		// 这里先置暂停,否则首部分块(数量等于 thread)的 http.start 会在监听方接入前发出,统计面板永久丢失这些状态
+		this.worker.pause()
 		if (this.P2P) {
 			this.rtcInit()
 		}
