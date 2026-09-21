@@ -173,6 +173,8 @@ export default class fastload extends event {
 			const buf = globalBuffer.get(this.config.meta, res.no)
 			if (!buf) {
 				// 任务错误了，全局buffer里也没有，这是重试多次也失败，只能终止
+				// 必须发出去,否则消费方只会看到一直 loading
+				this.trigger('error', res.err)
 				this.err = res.err
 				return true
 			}

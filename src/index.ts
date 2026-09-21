@@ -57,6 +57,11 @@ export default class extends fastload {
                     }
                     const f = new fastload(config);
                     this.loaders.push(f)
+                    // 内层 loader 永久失败只会停摆,需冒泡到外层,否则播放界面一直 loading
+                    f.listen('error', (e: unknown) => {
+                        this.trigger('error', e)
+                        this.pause()
+                    })
                     const disp = new dispatcher(indexdata, Number(index.end), Number(len), /\.webm/.test(req))
                     const segmentsMap = disp.getMap()
                     dispatchs.push(segmentsMap)
