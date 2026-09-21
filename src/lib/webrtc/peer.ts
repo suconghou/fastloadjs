@@ -79,7 +79,6 @@ export default class {
         // 移除dcInit时挂在window上的生命周期监听
         window.removeEventListener('pagehide', this.destroy_fn)
         window.removeEventListener('beforeunload', this.destroy_fn)
-        window.removeEventListener('unload', this.destroy_fn)
         try {
             if (this.dc) {
                 this.dc.onopen = null
@@ -329,10 +328,10 @@ export default class {
 
     private dcInit(dc: RTCDataChannel) {
         // https://www.igvita.com/2015/11/20/dont-lose-user-and-app-state-use-page-visibility/
-        // 微信关闭webview,执行pagehide和unload，不走beforeunload
+        // 微信关闭webview,执行pagehide,不走beforeunload
+        // unload已被废弃且受Permissions-Policy限制(触发violation告警),pagehide是其可靠替代,故不再注册unload
         window.addEventListener('pagehide', this.destroy_fn)
         window.addEventListener('beforeunload', this.destroy_fn)
-        window.addEventListener('unload', this.destroy_fn)
         dc.onopen = (e) => {
             this.isUsedRelay();
             this.trigger('open', { id: this.id, data: e });
@@ -366,7 +365,12 @@ export default class {
                 this.rx += data.length
             }
             this.activetime = Date.now()
-            this.extract(data)
+            try {
+                this.extract(data)
+            } catch (err) {
+                // decode对坏包/协议版本不符会抛异常,不能让onmessage产生unhandled rejection
+                log_warn(err)
+            }
         }
     }
 
@@ -512,7 +516,11 @@ export default class {
                 if (!exist) {
                     continue
                 }
-                this.sendBuffer(bufgoing)
+                if (!this.sendBuffer(bufgoing)) {
+                    // dc发送失败(连接已不可用),后续分片也不可能发出,清空整个发送队列等待重连后重新索要
+                    this.bufferQueue.length = 0
+                    return
+                }
                 // 调用完发送后，需要清理检查队列
                 this.resolveTasks = this.resolveTasks.filter(it => !(it.id == bufgoing.id && it.sn == bufgoing.part))
             }
@@ -557,6 +565,16 @@ export default class {
             }
             if (half) {
                 this.packet.add(`${info.id}:${info.sn}`)
+                if (this.packet.size > statCap) {
+                    this.packet.clear()
+                }
+                // 距最早收到的分片已超过60s仍未收齐(与resolveTasks/queryTasks的60s时效对齐),
+                // 放弃这个半包:清理缓存,不再进入下面的5s重传循环,避免对永远收不齐的包无限重发resolve
+                const allTimes = c.filter(i => i).map(i => i.t)
+                if (n - Math.min(...allTimes) > 60e3) {
+                    this.buffers.delete(bufKey)
+                    continue
+                }
                 const buf = globalBuffer.get(info.id, info.sn)
                 if (buf) {
                     // 如果在全局buffer里找到说明其他peer或http完成了任务，我们清理本peer的半包数据，但是丢包仍然是计算在内的
@@ -810,19 +828,28 @@ export default class {
 
     // 计算最终是否使用了中继
     private async isUsedRelay() {
-        const stats: any = await this.c.getStats()
-        let selectedLocalCandidate: string = ''
-        for (const { type, state, localCandidateId } of stats.values()) {
-            if (type === 'candidate-pair' && state === 'succeeded' && localCandidateId) {
-                selectedLocalCandidate = localCandidateId
-                break
+        try {
+            // onopen触发时连接可能已被重连/销毁重建,此时c已换新或为null,直接放弃本次统计
+            if (!this.c) {
+                return false
             }
+            const stats: any = await this.c.getStats()
+            let selectedLocalCandidate: string = ''
+            for (const { type, state, localCandidateId } of stats.values()) {
+                if (type === 'candidate-pair' && state === 'succeeded' && localCandidateId) {
+                    selectedLocalCandidate = localCandidateId
+                    break
+                }
+            }
+            this.relay = (Boolean(selectedLocalCandidate) && stats.get(selectedLocalCandidate)?.candidateType === 'relay')
+            if (this.relay) {
+                log_info("use relay", this, stats.get(selectedLocalCandidate))
+            }
+            return this.relay;
+        } catch (e) {
+            log_warn(e)
+            return false
         }
-        this.relay = (Boolean(selectedLocalCandidate) && stats.get(selectedLocalCandidate)?.candidateType === 'relay')
-        if (this.relay) {
-            log_info("use relay", this, stats.get(selectedLocalCandidate))
-        }
-        return this.relay;
     }
 
     public stat(): peerStat {

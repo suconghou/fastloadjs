@@ -39,7 +39,7 @@ export default class fastload extends event {
 
 	private rtcLoop: any = 0;
 
-	private rtcFound: number = 0;
+	private rtcFound: boolean = false;
 
 	private bufferHealth: number = 0;
 
@@ -107,7 +107,10 @@ export default class fastload extends event {
 
 	public destroy() {
 		this.remove('')
-		this.pause()
+		if (this.worker) {
+			this.worker.destroy()
+			this.worker = null
+		}
 		this.rtcReset()
 		if (this.bufferCtrl) {
 			this.bufferCtrl.destroy()
@@ -218,7 +221,6 @@ export default class fastload extends event {
 		}
 		// 如果发现此资源存在rtc,我们查询rtc抢占后剩余哪些任务
 		let nextItem: taskItem;
-		const t = Date.now()
 		for (const item of items) {
 			// http 已经抢占的必然跳过
 			if (this.httpPendings[item.no]) {
@@ -353,7 +355,7 @@ export default class fastload extends event {
 				// rtc实例是共享的,非本loader的数据忽略
 				return;
 			}
-			this.rtcFound++;
+			this.rtcFound = true
 			this.trigger('rtc.progress', { i: info.i, n: info.n, meta: info.id, part: info.sn, })
 		}
 		rtc.listen('buffer.recv', bufferProgress)

@@ -28,6 +28,9 @@ export default class extends event {
 	private me: string = uuid()
 	private $ws: ws | null = null;
 
+	// destroy时需清理,否则实例销毁后轮询仍空跑
+	private statTimer: any = null;
+
 	// 按 swarmId:sn 记录进行中的p2p请求,多swarm共用此实例
 	private resolving: Map<string, resolvingInfo> = new Map();
 
@@ -41,7 +44,7 @@ export default class extends event {
 		if (opts.tracker && typeof window.RTCPeerConnection == 'function') {
 			this.$ws = singal(opts.tracker);
 			this.init(this.$ws);
-			setInterval(() => {
+			this.statTimer = setInterval(() => {
 				const data = this.getStats()
 				if (Object.keys(data).length) {
 					emit('peers', data)
@@ -428,6 +431,7 @@ export default class extends event {
 	// 彻底销毁:停止轮询,销毁所有peer,关闭信令连接
 	destroy() {
 		this.enable = false
+		clearInterval(this.statTimer)
 		this.$ws = null
 		closeSignal()
 		streams.forEach(item => item.destroy())

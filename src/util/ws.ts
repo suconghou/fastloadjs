@@ -11,6 +11,7 @@ export default class extends event {
     private runing: Boolean = false;
     private timer: any;
     private delay: number = 2e3;
+    private destroyed: boolean = false;
 
     constructor(private addr: string) {
         super();
@@ -18,6 +19,7 @@ export default class extends event {
     }
 
     destroy() {
+        this.destroyed = true;
         this.stopconnect();
         this.connect = () => { }
         this.startconnect = () => { }
@@ -58,6 +60,9 @@ export default class extends event {
     }
 
     private startconnect() {
+        if (this.destroyed) {
+            return;
+        }
         if (this.timer) {
             // 已有重连定时器在跑,避免每次sendJson都重置间隔导致退避混乱
             return;
@@ -83,20 +88,29 @@ export default class extends event {
             return;
         }
         this.runing = true;
-        if (this.$ws && this.$ws.readyState == this.$ws.OPEN) {
-            const now = Date.now();
-            let item: { t: number, str: string } | undefined;
-            while ((item = this.tasks.shift())) {
-                if (now - item.t > queueTtl) {
-                    // 离线期间积压的旧信令(offer/answer/candidate)已失效,丢弃,避免重连后引发对端wrong state
-                    continue;
+        try {
+            if (this.$ws && this.$ws.readyState == this.$ws.OPEN) {
+                const now = Date.now();
+                let item: { t: number, str: string } | undefined;
+                while ((item = this.tasks.shift())) {
+                    if (now - item.t > queueTtl) {
+                        // 离线期间积压的旧信令(offer/answer/candidate)已失效,丢弃,避免重连后引发对端wrong state
+                        continue;
+                    }
+                    try {
+                        this.$ws.send(item.str);
+                    } catch (e) {
+                        // socket恰在此刻关闭等瞬时异常,丢弃这条消息,绝不能让异常逃出notify,
+                        // 否则runing永远为true,后续sendJson只入队不发送,信令通道死锁
+                        console.warn(e);
+                    }
                 }
-                this.$ws.send(item.str);
+            } else {
+                this.startconnect();
             }
-        } else {
-            this.startconnect();
+        } finally {
+            this.runing = false
         }
-        this.runing = false;
     }
 
     // raw ws send

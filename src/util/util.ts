@@ -7,8 +7,9 @@ export const uuid = () => {
     }
     uid = sessionStorage.getItem('uid')
     if (!uid || uid.length != 36) {
+        // 每段固定4字符,8段+4个连字符恒等于36,与下面的length校验匹配,保证uid在会话内稳定复用
         function S4() {
-            return (((1 + Math.random()) * 0x10000) | 0).toString(36)
+            return ('000' + (((1 + Math.random()) * 0x10000) | 0).toString(36)).slice(-4)
         }
         uid = (S4() + S4() + "-" + S4() + "-" + S4() + "-" + S4() + "-" + S4() + S4() + S4());
         sessionStorage.setItem('uid', uid)

@@ -22,7 +22,8 @@ export default class extends fastload {
             no: 1e9 * (mirrors.length + 1), // only for cache key in tasks.wrap, 此数值使取余算法得到第0位置
             begin: 0, // not used in tasks.wrap
         }
-        const retry = 10
+        // init/index是播放器启动的关键请求,重试次数不宜过高:内部每次重试timeout递增(15s起),10次可阻塞播放器近7分钟
+        const retry = 3
         const res = await taskWrapper.wrap(item, id, retry, req, mirrors)()
         if (res.err) {
             throw res.err
@@ -31,6 +32,10 @@ export default class extends fastload {
     }
 
     async attach(video: HTMLMediaElement, streams: Array<streamItem>) {
+        // 重复attach(如切换播放源)时,旧实例的worker/rtc/buffer若不销毁,旧buffer会因mediaSource已关闭而无限空转
+        if (this.loaders.length) {
+            await this.destroy()
+        }
         const mediaSource = new MediaSource;
 
         const sourceOpen = async () => {
@@ -125,7 +130,14 @@ export default class extends fastload {
                     this.setBufferHealth(cached)
                     return
                 }
+                if (cur < start) {
+                    // 播放点落在所有缓冲区之前(如回退到已被清理的位置),缓冲区对当前播放不可用,按无缓存处理
+                    break
+                }
             }
+            // 越过最后一个缓冲区的末尾,同样需要继续下载
+            this.start()
+            this.setBufferHealth(0)
         }
     }
 
@@ -152,6 +164,8 @@ export default class extends fastload {
         this.detachFns = []
         this.loaders.forEach(item => item.destroy())
         this.loaders = []
+        // 顶层实例自身也持有rtc引用计数,必须经super.destroy()走rtcReset释放,否则共享的rtc实例永不销毁
+        super.destroy()
         if (this.video && this.video.src) {
             window.URL.revokeObjectURL(this.video.src);
         }

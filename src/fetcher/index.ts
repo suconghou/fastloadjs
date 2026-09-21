@@ -20,8 +20,9 @@ export default class fetcher {
 		if (!res.ok) {
 			throw new Error(`${res.url} : ${res.statusText || res.status}`)
 		}
+		let timer: any
 		const timeout: Promise<ArrayBuffer> = new Promise((resolve, reject) => {
-			setTimeout(() => {
+			timer = setTimeout(() => {
 				reject("readtimeout")
 			}, opts.readtimeout)
 		})
@@ -34,6 +35,7 @@ export default class fetcher {
 				reject(e);
 			}
 		})
-		return Promise.race([timeout, resdata])
+		// 竞速结束后立即清理定时器,否则readtimeout会空跑到超时周期结束
+		return Promise.race([timeout, resdata]).finally(() => clearTimeout(timer))
 	}
 }

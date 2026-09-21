@@ -6,6 +6,7 @@ export default class {
 	private t: number = 0
 	private tasks: Array<fetchTask> = []
 	private paused: boolean = false;
+	private stopped: boolean = false;
 
 	constructor(private threadNum: number, private retry: number, private callback: Function, private finish?: Function) {
 
@@ -19,9 +20,17 @@ export default class {
 		this.paused = false
 	}
 
+	// 终止所有线程,线程会在100ms内退出,不再空轮询
+	destroy() {
+		this.stopped = true
+	}
+
 	private async thread(threadId: number) {
 		let last = false
 		while (true) {
+			if (this.stopped) {
+				break
+			}
 			if (this.paused) {
 				await sleep(100)
 				continue
