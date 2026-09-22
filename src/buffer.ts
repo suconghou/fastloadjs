@@ -44,8 +44,11 @@ export default class extends event {
                                 if (e.name !== 'QuotaExceededError') {
                                     throw e
                                 }
-                                this.trigger('pause');
-                                this.sourceBuffer.remove(0, Math.max(1, this.video.currentTime - 10));
+                                // 缓冲已满:清掉播放点之前的数据腾空间,同时把"清到哪里"告诉上层,
+                                // 上层据此只遗忘真正被移除的分片,仍在缓冲里的分片继续受保护,避免重复 append
+                                const end = Math.max(1, this.video.currentTime - 10);
+                                this.trigger('pause', end);
+                                this.sourceBuffer.remove(0, end);
                                 await sleep(80);
                                 continue;
                             }

@@ -3,5 +3,6 @@
 dist
 .cache
 .DS_Store
+.workbuddy
 hlsp2p-sync.md
 

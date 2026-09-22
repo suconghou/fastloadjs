@@ -7,7 +7,9 @@ import { globalBuffer } from '../util/bufferCenter';
 export default class {
 
 	// 处理mirrors负载策略,item我们只用start,end,no三个字段,id和no用于重试时查找globalBuffer缓存,下载成功后存储到globalBuffer
-	static wrap(item: taskItem, id: string, retry: number, req: string, mirrorsList: Array<string>): fetchTask {
+	// cacheable=false 用于 init/index 这类一次性请求:它们不参与分片缓存(否则会被 hosts() 当成已持有的分片广播给 peer),
+	// 也避免两个不同 payload 共用同一个 no 时互相命中缓存
+	static wrap(item: taskItem, id: string, retry: number, req: string, mirrorsList: Array<string>, cacheable: boolean = true): fetchTask {
 		const { start, end, no } = item
 		let i = 0;
 		const used: Array<string> = []
@@ -25,17 +27,19 @@ export default class {
 			used.push(u)
 			return u
 		}
-		return this.retry(retry, urlFn, id, start, end, no)
+		return this.retry(retry, urlFn, id, start, end, no, cacheable)
 	}
 
 	// 再此处理重试逻辑, 此处校验数据, 此处的end值,实际在range时,需要-1
-	private static retry(retry: number, urlFn: (() => string), id: string, start: number, end: number, no: number): fetchTask {
+	private static retry(retry: number, urlFn: (() => string), id: string, start: number, end: number, no: number, cacheable: boolean = true): fetchTask {
 		return async (): Promise<partResponse> => {
 			const res: partResponse = { no: no, data: null, err: null };
-			const buf = globalBuffer.get(id, no)
-			if (buf) {
-				res.data = buf.buffer
-				return res
+			if (cacheable) {
+				const buf = globalBuffer.get(id, no)
+				if (buf) {
+					res.data = buf.buffer
+					return res
+				}
 			}
 			let url: string;
 			const size = end - start;
@@ -54,11 +58,13 @@ export default class {
 						throw new Error(`short read error:expect ${size},got ${r}`);
 					}
 					// 下载完成,并且检查没有错误,则中断循环返回
-					globalBuffer.put({ id, part: no, buffer: res.data })
+					if (cacheable) {
+						globalBuffer.put({ id, part: no, buffer: res.data })
+					}
 					break
 				} catch (e) {
 					// 如果这次下载失败,但是我们检查结果,可能rtc已经成功了,放弃本次http任务
-					const buf = globalBuffer.get(id, no)
+					const buf = cacheable ? globalBuffer.get(id, no) : null
 					if (buf) {
 						console.info("http error but rtc ok", start, end, no)
 						res.err = null;
@@ -68,6 +74,9 @@ export default class {
 					opts.cache = false
 					console.error(e, i, url, start, end, no)
 					res.err = e;
+					// 失败的尝试必须清掉 data:short read 等校验失败时 data 已被赋值,
+					// 上层 taskDone 先判 res.data,会把半截数据当成功写入 sourceBuffer
+					res.data = null
 					await sleep(2e3)
 					opts.timeout += 5e3;
 				}

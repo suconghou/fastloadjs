@@ -23,7 +23,7 @@ export default class fetcher {
 		let timer: any
 		const timeout: Promise<ArrayBuffer> = new Promise((resolve, reject) => {
 			timer = setTimeout(() => {
-				reject("readtimeout")
+				reject(new Error("readtimeout"))
 			}, opts.readtimeout)
 		})
 		const resdata: Promise<ArrayBuffer> = new Promise(async (resolve, reject) => {

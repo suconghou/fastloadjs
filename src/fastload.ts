@@ -16,6 +16,9 @@ export default class fastload extends event {
 	// 共享rtc实例的引用计数,最后一个loader销毁时才真正销毁rtc
 	private static rtcCount = 0;
 
+	// 本实例是否持有rtc引用:非P2P环境不会持有,重复destroy也不能重复释放计数
+	private rtcRef: boolean = false;
+
 	protected config: fastConfig;
 
 	private dispatcher: dispatcher
@@ -30,6 +33,8 @@ export default class fastload extends event {
 		retry: 5,
 		thread: 2,
 		wsize: 12,
+		// 缺省置空,避免 [req].concat(undefined) 生成 undefined 镜像项
+		mirrors: [],
 	}
 
 	// 由外部注入,提供直接操作sourceBuffer的入口
@@ -55,6 +60,7 @@ export default class fastload extends event {
 		if (this.P2P) {
 			this.rtc()
 			fastload.rtcCount++
+			this.rtcRef = true
 		}
 	}
 
@@ -63,10 +69,10 @@ export default class fastload extends event {
 		const { thread, retry } = this.config
 		this.bufferCtrl = bufferCtrl
 		this.dispatcher = disp;
-		bufferCtrl.listen('pause', () => {
-			// buffer is full
+		bufferCtrl.listen('pause', (end: number) => {
+			// buffer is full,已移除 [0,end) 的数据
 			this.pause()
-			this.bufferInuse.clear()
+			this.forgetInuse(end)
 		})
 		this.worker = new workers(thread, retry, (res: partResponse) => this.taskDone(res))
 		// init() 会立即起线程,而 attach 在 ready 之后才调用 start();
@@ -82,6 +88,19 @@ export default class fastload extends event {
 			})
 		}
 		return this;
+	}
+
+	// sourceBuffer 写满时移除了 [0,time) 的数据,只有这部分分片需要允许重新写入;
+	// 仍在缓冲里的分片必须继续留在 bufferInuse 中,否则 seek 回退到该区间时会被重复 append
+	// 边界上的那一片按"已移除"处理(begin < time):宁可重复写入一片,也不能留下补不回来的空洞
+	private forgetInuse(time: number) {
+		const map = this.dispatcher.getMap()
+		for (const no of this.bufferInuse) {
+			const item = map[no]
+			if (!item || item.begin < time) {
+				this.bufferInuse.delete(no)
+			}
+		}
 	}
 
 	private check(no: number): boolean {
@@ -108,8 +127,11 @@ export default class fastload extends event {
 		this.bufferHealth = t;
 	}
 
-	public destroy() {
-		this.remove('')
+	// keepListen: true 时保留监听器(attach 内部重建使用),默认清空全部监听
+	public destroy(keepListen: boolean = false) {
+		if (!keepListen) {
+			this.remove('')
+		}
 		if (this.worker) {
 			this.worker.destroy()
 			this.worker = null
@@ -126,14 +148,20 @@ export default class fastload extends event {
 		this.start();
 		const segmentsMap = this.dispatcher.getMap();
 		const len = this.dispatcher.total;
+		if (!len) {
+			return
+		}
+		// 命中分片时取它前面一片(保守,多下一片保证覆盖);都未命中(seek 到最后一个分片之后)
+		// 则退化为定位到最后一片,避免静默不生效
+		let target = len - 1;
 		for (let i = 0; i < len; i++) {
 			const item = segmentsMap[i];
 			if (item.begin >= time) {
-				const index = Math.max(i - 1, 0)
-				this.dispatcher.seekTo(index);
-				return;
+				target = Math.max(i - 1, 0)
+				break
 			}
 		}
+		this.dispatcher.seekTo(target);
 	}
 
 	// 封装为闭包任务
@@ -154,13 +182,14 @@ export default class fastload extends event {
 			// 如果bufferCtrl都没有了,说明早已destroy了,发出终止信号
 			return true
 		}
+		if (this.err) {
+			// 一旦出错,不能跳过,必须全部终止,TODO show error
+			// 必须早于下面的空轮询分支:否则永久失败的分片会被空轮询反复重新派发,并重复触发 error 事件
+			return true;
+		}
 		if (res.no < 0) {
 			// 是我们轮询的空任务,就继续检测下次任务
 			return this.triggerNextTask();
-		}
-		if (this.err) {
-			// 一旦出错,不能跳过,必须全部终止,TODO show error
-			return true;
 		}
 		let buffer: ArrayBuffer
 		// 如果任务成功，则必然已加入globalBuffer，仅当任务失败时，globalBuffer才查询不到
@@ -424,6 +453,12 @@ export default class fastload extends event {
 			clearTimeout(this.rtcLoop)
 			this.rtcLoop = 0
 		}
+		if (!this.rtcRef) {
+			// 未持有(非P2P环境)或已释放过:destroy 可重复调用,不能重复减少计数,
+			// 否则计数漂移后会在仍有 loader 存活时销毁共享 rtc
+			return
+		}
+		this.rtcRef = false
 		fastload.rtcCount--
 		if (fastload.rtcCount <= 0 && fastload.rtcInstance) {
 			// 最后一个loader销毁,才真正关闭信令与所有peer

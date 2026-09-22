@@ -19,12 +19,15 @@ export default class extends fastload {
         const item: taskItem = {
             start,
             end,
-            no: 1e9 * (mirrors.length + 1), // only for cache key in tasks.wrap, 此数值使取余算法得到第0位置
+            // no 此处仅用于镜像取余,取 0 恒落源站。init/index 不写 globalBuffer:
+            // 两者若共用一个 no,重复 attach(同 meta,600s 内)时 init 会命中 index 的缓存拿到对方的字节;
+            // 且这两个 payload 会被 hosts() 当作"已持有的分片"广播给 peer
+            no: 0,
             begin: 0, // not used in tasks.wrap
         }
         // init/index是播放器启动的关键请求,重试次数不宜过高:内部每次重试timeout递增(15s起),10次可阻塞播放器近7分钟
         const retry = 3
-        const res = await taskWrapper.wrap(item, id, retry, req, mirrors)()
+        const res = await taskWrapper.wrap(item, id, retry, req, mirrors, false)()
         if (res.err) {
             throw res.err
         }
@@ -33,8 +36,9 @@ export default class extends fastload {
 
     async attach(video: HTMLMediaElement, streams: Array<streamItem>) {
         // 重复attach(如切换播放源)时,旧实例的worker/rtc/buffer若不销毁,旧buffer会因mediaSource已关闭而无限空转
+        // keepListen:此处必须保留调用方注册的监听器,否则切换播放源后 error/ready 监听会静默失效,后续错误将被吞掉
         if (this.loaders.length) {
-            await this.destroy()
+            await this.destroy(true)
         }
         const mediaSource = new MediaSource;
 
@@ -44,6 +48,11 @@ export default class extends fastload {
                 const tasks = [];
                 for (let i = 0; i < streams.length; i++) {
                     const { req, init, index, mimeCodec, len, meta, mirrors } = streams[i]
+                    // 分块 URL 依赖扩展名改写(见 README"关于 URL 改写"),源地址必须在路径末段以 .mp4/.webm 结尾。
+                    // 在此提前拦下,否则每个分片都会先白拉一次整文件,直到 short read 校验才失败
+                    if (!/\.(mp4|webm)([?#]|$)/.test(req)) {
+                        throw new Error(`unsupported stream url:${req} (需以 .mp4/.webm 结尾)`)
+                    }
                     const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors || []), this.get(req, meta, index.start, index.end + 1, mirrors || [])])
                     const config = {
                         req,
@@ -209,7 +218,8 @@ export default class extends fastload {
         return this;
     }
 
-    public async destroy() {
+    // keepListen: 保留监听器(attach 内部重建时使用),默认 false 会连带清空调用方注册的事件
+    public async destroy(keepListen: boolean = false) {
         this.pause()
         if (this.disarmStall) {
             this.disarmStall()
@@ -221,7 +231,7 @@ export default class extends fastload {
         this.loaders.forEach(item => item.destroy())
         this.loaders = []
         // 顶层实例自身也持有rtc引用计数,必须经super.destroy()走rtcReset释放,否则共享的rtc实例永不销毁
-        super.destroy()
+        super.destroy(keepListen)
         if (this.video && this.video.src) {
             window.URL.revokeObjectURL(this.video.src);
         }

@@ -1,5 +1,5 @@
 import ws from '../../util/ws'
-import { uuid, str2ab, concatArrayBuffers } from '../../util/util';
+import { uuid, concatArrayBuffers } from '../../util/util';
 import { rtcRecv } from '../../types';
 
 
@@ -56,7 +56,7 @@ export const decode = (data: ArrayBuffer): rtcRecv => {
     const l = x[3]
     const meta = x.slice(4, 4 + l)
     const body = data.slice(4 + l)
-    const metaStr = String.fromCharCode(...meta);
+    const metaStr = new TextDecoder().decode(meta);
     const [id, sn, i, n] = JSON.parse(metaStr)
     const ret: rtcRecv = {
         id,
@@ -72,8 +72,14 @@ export const decode = (data: ArrayBuffer): rtcRecv => {
 
 export const encode = (data: ArrayBuffer, id: string, sn: number, i: number, n: number): ArrayBuffer => {
     const str = JSON.stringify([id, sn, i, n]);
-    const x = new Uint8Array([protocol[0], protocol[1], version, str.length]);
-    return concatArrayBuffers([x.buffer, str2ab(str), data]);
+    // 头部长度只有 1 字节,必须取 UTF-8 字节数:取 str.length(UTF-16)会在 meta 含多字节字符时让对端解析错位;
+    // 超限时直接抛出,避免静默截断后对端只能收到坏包。纯 ASCII 时与旧实现逐字节一致,不影响已部署的对端
+    const meta = new TextEncoder().encode(str);
+    if (meta.length > 255) {
+        throw new Error(`p2p meta too long:${meta.length} > 255`);
+    }
+    const x = new Uint8Array([protocol[0], protocol[1], version, meta.length]);
+    return concatArrayBuffers([x.buffer, meta.buffer, data]);
 }
 
 

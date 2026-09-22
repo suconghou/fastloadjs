@@ -45,6 +45,9 @@ export default class extends event {
 			this.$ws = singal(opts.tracker);
 			this.init(this.$ws);
 			this.statTimer = setInterval(() => {
+				if (!this.enable) {
+					return
+				}
 				const data = this.getStats()
 				if (Object.keys(data).length) {
 					emit('peers', data)
@@ -432,6 +435,7 @@ export default class extends event {
 	destroy() {
 		this.enable = false
 		clearInterval(this.statTimer)
+		this.statTimer = null
 		this.$ws = null
 		closeSignal()
 		streams.forEach(item => item.destroy())

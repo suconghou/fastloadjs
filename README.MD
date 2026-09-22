@@ -18,7 +18,7 @@ yarn global add rollup typescript esbuild
 make build
 ```
 
-`tsc` 编译 → `rollup` 打包成 UMD → `esbuild` 压缩,产出单文件 `fastload.min.js`(全局名 `fastloadjs`,约 37KB),可直接 `<script>` 引入。
+`tsc` 编译 → `rollup` 打包成 UMD → `esbuild` 压缩,产出单文件 `fastload.min.js`(全局名 `fastloadjs`,约 38KB),可直接 `<script>` 引入。
 
 `make dev` 起本地静态服务器(`http://localhost:8080`)调试根目录 `index.html`,读取的是未压缩的 `bundle.js`,便于断点。
 
@@ -87,7 +87,7 @@ make build
 
 | 方法 | 说明 |
 | --- | --- |
-| `attach(video, streams)` | 绑定媒体元素并开始下载,attach 前应先 `listen('ready')` |
+| `attach(video, streams)` | 绑定媒体元素并开始下载,attach 前应先 `listen('ready')`。重复 attach(切换播放源)会重建内部实例,但**保留已注册的监听器** |
 | `start()` / `pause()` | 恢复 / 暂停所有路的下载 |
 | `seekTo(time)` | 跳到指定播放位置(秒),重新定位下载窗口 |
 | `setBufferHealth(sec)` | 告知下载器当前缓冲秒数,缓冲充足时自动降速让位 P2P |

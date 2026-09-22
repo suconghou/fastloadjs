@@ -38,9 +38,12 @@ export default class {
         let time = earliest_presentation_time;
         let offset = first_offset;
         for (let i = 0; i < reference_count; i++) {
-            const reference_type = 0;
-            const reference_size = data.getUint32(pos)
+            const raw = data.getUint32(pos)
             pos += 4;
+            // 高 1 位是 reference_type(1 表示该引用指向另一段索引,不是媒体数据),低 31 位才是字节长度。
+            // 直接把整个 uint32 当长度用,遇到层级引用会算出 2GB 级的区间
+            const reference_type = raw >>> 31;
+            const reference_size = raw & 0x7FFFFFFF
             const subsegment_duration = data.getUint32(pos)
             pos += 4
             // 下面是 starts_with_SAP, SAP_type, SAP_delta_time 没用到,这里忽略掉
