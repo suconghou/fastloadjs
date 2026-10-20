@@ -221,6 +221,11 @@ export default class fastload extends event {
 		if (this.rtcFound && this.bufferHealth > 15) {
 			await sleep(1e3 * (this.bufferHealth / 30)) // 每30秒buffer换取1秒延时
 		}
+		// sleep 期间可能已经 destroy(worker 已置空),taskDone 入口处的 bufferCtrl 检测无法覆盖这段空窗,
+		// 此处必须重检,否则 this.worker.push 抛 TypeError,成为 worker 线程的 unhandled rejection
+		if (!this.worker || !this.bufferCtrl) {
+			return true
+		}
 		const items: Array<taskItem> = this.dispatcher.next(this.config.wsize + this.config.thread, this.check.bind(this))
 		if (!items.length) {
 			// 全部buffer都已存在，只能表明当前window下,没有需要发起请求的了,我们空轮询

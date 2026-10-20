@@ -23,6 +23,8 @@ export default class fetcher {
 		let timer: any
 		const timeout: Promise<ArrayBuffer> = new Promise((resolve, reject) => {
 			timer = setTimeout(() => {
+				// 读超时了,body 仍在后台读取:它占用连接与带宽,主机并发连接数有限,会拖饿后续分片请求,这里直接取消
+				res.body?.cancel().catch(() => { })
 				reject(new Error("readtimeout"))
 			}, opts.readtimeout)
 		})

@@ -54,6 +54,12 @@ export default class extends fastload {
                         throw new Error(`unsupported stream url:${req} (需以 .mp4/.webm 结尾)`)
                     }
                     const [initdata, indexdata] = await Promise.all([this.get(req, meta, init.start, init.end + 1, mirrors || []), this.get(req, meta, index.start, index.end + 1, mirrors || [])])
+                    // 此前是异步,如果频繁切换,可能本实例已被destroy,检测一下
+                    // 必须在 new fastload 之前:否则快速连续 attach 时,旧 sourceOpen 协程会把已废弃的 loader 塞进 this.loaders,
+                    // 它从未 init(),却计入 rtcCount,并作为无效项混入下一次 ready 交给调用方
+                    if (mediaSource.readyState !== 'open') {
+                        return;
+                    }
                     const config = {
                         req,
                         thread: this.config.thread,
@@ -75,10 +81,6 @@ export default class extends fastload {
                     const segmentsMap = disp.getMap()
                     dispatchs.push(segmentsMap)
 
-                    // 此前是异步,如果频繁切换,可能本实例已被destroy,检测一下
-                    if (mediaSource.readyState !== 'open') {
-                        return;
-                    }
                     const buffer = new bufferController(video, mediaSource, mimeCodec)
                     f.init(buffer, disp)
 
