@@ -116,8 +116,6 @@ export default class extends fastload {
         this.video = video
         this.mediaSource = mediaSource
         video.src = URL.createObjectURL(mediaSource);
-        this.timeUpdate = this.timeUpdate.bind(this)
-        this.onWaiting = this.onWaiting.bind(this)
         video.addEventListener('timeupdate', this.timeUpdate)
         video.addEventListener('progress', this.timeUpdate)
         // 缓冲耗尽时currentTime不再推进,timeupdate停发,worker若处于pause会永久卡死,此处兜底恢复
@@ -141,7 +139,9 @@ export default class extends fastload {
     private stallTimer: any = null
     private disarmStall: Function = null
 
-    private timeUpdate() {
+    // 以箭头属性声明:监听器函数引用在实例生命周期内稳定,
+    // 反复 attach 也不会因重新 bind 出新的函数引用而残留旧监听
+    private timeUpdate = () => {
         if (this.video.buffered.length) {
             const cur = this.video.currentTime;
             for (let i = 0; i < this.video.buffered.length; i++) {
@@ -170,7 +170,7 @@ export default class extends fastload {
     }
 
     // 视频因缓冲不足而停顿时,立即恢复下载,避免pause状态下事件停发导致的死锁
-    private onWaiting() {
+    private onWaiting = () => {
         this.start()
         this.armStallCheck()
         if (this.video.buffered.length) {

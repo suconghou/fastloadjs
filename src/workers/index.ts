@@ -26,7 +26,6 @@ export default class {
 	}
 
 	private async thread(threadId: number) {
-		let last = false
 		while (true) {
 			if (this.stopped) {
 				break
@@ -39,17 +38,13 @@ export default class {
 			if (task) {
 				const res = await this.do(task)
 				if (await this.taskOneDone(res)) {
-					// 回调以后是否派发了下一个任务,没有下一个任务了,这个返回true,标记最后
-					last = true
+					// 上层已要求终止(出错或已销毁),立即退出:队列中剩余任务若继续执行,
+					// 只会多发几个注定被丢弃的请求,且延迟线程释放
+					break
 				}
 			} else {
 				await sleep(100)
-				// worker停止的条件是 任务队列已近是空的了,并且之前回调已响应没有后续任务
-				if (last) {
-					break
-				}
 			}
-
 		}
 		this.taskDone();
 	}
